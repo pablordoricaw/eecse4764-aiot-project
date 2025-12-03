@@ -4,6 +4,7 @@ import time
 import network
 import ujson
 import urequests
+import ntptime # REQUIRED: To sync clock with internet
 
 # ------------------------------------------------------------------------------
 # 1. CONFIGURATION
@@ -11,16 +12,15 @@ import urequests
 WIFI_SSID = "Columbia University"
 # WIFI_PASS = "" 
 
-# DATABASE SETTINGS
+# DATABASE & LLM
 DB_BASE_URL = "http://192.168.1.XXX:8000/logs"
 DEVICE_ID   = "ventilator-01"
-LOG_LIMIT   = 1  # Get 1 record at a time
+LLM_URL     = "http://192.168.1.YYY:5000/api/ingest"
 
-# LLM SETTINGS
-LLM_URL = "http://192.168.1.YYY:5000/api/ingest"
-
-# Polling Interval (Seconds)
-POLL_DELAY = 2
+# RECORDING SETTINGS
+PRE_ERROR_LOGS  = 20
+POST_ERROR_LOGS = 20
+POLL_DELAY      = 1   # Faster polling to catch logs quickly
 
 # ------------------------------------------------------------------------------
 # 2. HARDWARE SETUP
@@ -32,157 +32,190 @@ try:
 except:
     HAS_SCREEN = False
 
-# Temperature Sensor (Simulated on Pin 34)
 temp_adc = ADC(Pin(34))
 temp_adc.atten(ADC.ATTN_11DB) 
 
 def read_sensor_temperature():
     try:
         raw_val = temp_adc.read()
-        # Simulated fluctuation around 73.0C
         return round(73.0 + ((raw_val % 20) / 10.0), 1)
     except:
         return 73.0
 
-def update_display(status_line, temp_val):
+def update_display(line1, line2):
     if not HAS_SCREEN: return
     oled.fill(0)
-    oled.text("Stage 2: Bridge", 0, 0, 1)
-    oled.text(status_line, 0, 12, 1)
-    oled.text(f"Sense: {temp_val}C", 0, 22, 1)
+    oled.text(line1, 0, 0, 1)
+    oled.text(line2, 0, 12, 1)
     oled.show()
 
 # ------------------------------------------------------------------------------
-# 3. NETWORK LOGIC
+# 3. TIME & PARSING HELPERS
+# ------------------------------------------------------------------------------
+def sync_clock():
+    """Syncs ESP32 internal clock with internet time"""
+    print("[TIME] Syncing NTP...")
+    try:
+        ntptime.settime() # Sets internal RTC
+        print("[TIME] Synced!", time.localtime())
+    except:
+        print("[TIME] Sync failed")
+
+def parse_iso_simple(iso_str):
+    """
+    Rough parsing of ISO string to epoch seconds for comparison.
+    Format assumption: '2025-12-03T20:37:00.123Z'
+    """
+    try:
+        # Remove fractional seconds and 'Z'
+        clean = iso_str.split('.')[0] # 2025-12-03T20:37:00
+        parts = clean.replace('T', '-').replace(':', '-').split('-')
+        # parts: [Year, Mon, Day, Hour, Min, Sec]
+        t_tuple = (int(parts[0]), int(parts[1]), int(parts[2]), 
+                   int(parts[3]), int(parts[4]), int(parts[5]), 0, 0)
+        return time.mktime(t_tuple)
+    except:
+        return 0
+
+# ------------------------------------------------------------------------------
+# 4. NETWORK LOGIC
 # ------------------------------------------------------------------------------
 def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if not wlan.isconnected():
-        if HAS_SCREEN:
-            oled.fill(0); oled.text("WiFi Connect...", 0, 0, 1); oled.show()
         wlan.connect(WIFI_SSID)
         timeout = 10
         while not wlan.isconnected() and timeout > 0:
             time.sleep(1)
             timeout -= 1
-            
-    if wlan.isconnected():
-        print('[WiFi] IP:', wlan.ifconfig()[0])
-        return True
-    return False
+    return wlan.isconnected()
 
-def fetch_logs_with_cursor(current_since):
-    """
-    GET /logs?device_id=...&since=...&limit=...
-    """
-    # Build URL manually
-    url = f"{DB_BASE_URL}?device_id={DEVICE_ID}&limit={LOG_LIMIT}&since={current_since}"
-    
-    # Print simplified timestamp for debugging
-    print(f"[GET] Since: ...{current_since[-10:]}") 
-    
+def fetch_logs(current_since):
+    # Fetch 1 at a time to keep logic simple and ordered
+    url = f"{DB_BASE_URL}?device_id={DEVICE_ID}&limit=1&since={current_since}"
     try:
-        response = urequests.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            response.close()
-            
-            # Response Shape: { "logs": [...], "next_since": "..." }
-            logs = data.get("logs", [])
-            next_since = data.get("next_since", current_since)
-            
-            return logs, next_since
-        else:
-            print(f"[GET] Error: {response.status_code}")
-            response.close()
-            return [], current_since
-            
-    except Exception as e:
-        print(f"[GET] Failed: {e}")
-        return [], current_since
+        res = urequests.get(url)
+        if res.status_code == 200:
+            data = res.json()
+            res.close()
+            return data.get("logs", []), data.get("next_since", current_since)
+        res.close()
+    except:
+        pass
+    return [], current_since
 
-def send_to_llm(log_record, real_temp):
+def send_package_to_llm(log_sequence, temp_history):
     """
-    Maps Log fields -> LLM Payload
+    COMBINES Logs and Temps into one request
     """
-    print(f"[POST] Sending to LLM...")
+    print(f"\n[POST] Packaging {len(log_sequence)} logs & Temp Data...")
+    update_display("Packaging...", "Sending to LLM")
     
-    # Extract fields from the dataset
-    # Fields: timestamp, device_id, level, event_type, error_code, message
+    # 1. Determine Time Interval from the logs
+    first_log_time = parse_iso_simple(log_sequence[0].get('timestamp', ''))
+    last_log_time  = parse_iso_simple(log_sequence[-1].get('timestamp', ''))
     
-    sim_error_code = log_record.get("error_code") # Might be None/Null
-    if sim_error_code is None:
-        sim_error_code = "None"
-        
+    # 2. Filter Temp History for this interval
+    relevant_temps = []
+    for t_entry in temp_history:
+        # Allow a small buffer (e.g. +/- 2 seconds)
+        if t_entry['ts'] >= (first_log_time - 2) and t_entry['ts'] <= (last_log_time + 2):
+            relevant_temps.append(t_entry)
+            
+    print(f"[POST] Found {len(relevant_temps)} temps in interval {first_log_time}-{last_log_time}")
+
+    # 3. Construct Payload
     payload = {
-        # Data from Database (Simulation)
-        "fda_error_code": sim_error_code,
-        "log_message": log_record.get("message", ""),
-        "log_level": log_record.get("level", "INFO"),
-        "event_type": log_record.get("event_type", "UNKNOWN"),
-        "log_timestamp": log_record.get("timestamp", ""),
-        
-        # Data from Physical World (ESP32)
-        "sensor_temp": real_temp,
-        
-        # Metadata
+        "context": "Error Event Packet",
         "device_id": DEVICE_ID,
-        "sender": "ESP32_Bridge"
+        "log_sequence": log_sequence,      # The 20 before + error + 20 after
+        "temperature_data": relevant_temps # The temps matching that timeframe
     }
     
     headers = {'Content-Type': 'application/json'}
-    
     try:
-        response = urequests.post(LLM_URL, json=payload, headers=headers)
-        if response.status_code == 200:
-            update_display("Sent to LLM!", real_temp)
-            print("   -> LLM Success")
-        else:
-            print(f"   -> LLM Fail: {response.status_code}")
-        response.close()
+        res = urequests.post(LLM_URL, json=payload, headers=headers)
+        print(f"[POST] Status: {res.status_code}")
+        res.close()
         return True
     except Exception as e:
-        print(f"[POST] Error: {e}")
+        print(f"[POST] Failed: {e}")
         return False
 
 # ------------------------------------------------------------------------------
-# 4. MAIN LOOP
+# 5. MAIN LOOP (STATE MACHINE)
 # ------------------------------------------------------------------------------
 def main():
     if not connect_wifi(): return
-
-    # INITIAL CURSOR
-    # Start in the past to ensure we get data. 
-    # Use current ISO time if you ONLY want live data.
-    cursor_since = "2024-01-01T00:00:00.000Z"
-
-    print("System Online. Monitoring Logs...")
+    sync_clock() # Sync time so our temp timestamps match server logs
     
-    while True:
-        current_temp = read_sensor_temperature()
-        update_display("Scanning DB...", current_temp)
-        
-        # 1. Fetch Logs
-        logs, next_since = fetch_logs_with_cursor(cursor_since)
-        
-        # 2. Update Cursor (Always move forward)
-        if next_since and next_since != "":
-            cursor_since = next_since
+    # BUFFERS
+    # We keep temp history for safety (last ~300 entries / 10 mins)
+    temp_history = [] 
+    
+    # We keep logs based on logic
+    log_buffer = [] 
+    
+    # STATE
+    # "MONITORING" or "COLLECTING_POST_ERROR"
+    state = "MONITORING"
+    logs_needed_after_error = 0
+    
+    cursor_since = "2024-01-01T00:00:00.000Z" 
 
-        # 3. Process Logic
-        if len(logs) > 0:
-            print(f"   -> Processing {len(logs)} logs...")
-            update_display("Sending Log...", current_temp)
-            
-            # Since limit=1, we take the first
-            latest_log = logs[0]
-            
-            # 4. Send to LLM
-            send_to_llm(latest_log, current_temp)
-        else:
-            print("   -> No new logs.")
-            
+    print("System Online. Buffering...")
+
+    while True:
+        # A. READ TEMP (Add to History)
+        # Store tuple: {ts: epoch_seconds, val: 73.0}
+        current_temp = read_sensor_temperature()
+        temp_history.append({"ts": time.time(), "val": current_temp})
+        
+        # Keep temp buffer manageable (remove old > 500 items)
+        if len(temp_history) > 500:
+            temp_history.pop(0)
+
+        # B. FETCH LOGS
+        new_logs, next_since = fetch_logs(cursor_since)
+        if next_since: cursor_since = next_since
+
+        # C. PROCESS LOGS
+        for log in new_logs:
+            # Add to our buffer
+            log_buffer.append(log)
+            print(f"[LOG] {log.get('message', '')} [{state}]")
+
+            # LOGIC ENGINE
+            if state == "MONITORING":
+                # 1. Prune Buffer: We only need to keep 'PRE_ERROR_LOGS' 
+                # until we find an error.
+                if len(log_buffer) > PRE_ERROR_LOGS + 1: 
+                    log_buffer.pop(0) 
+
+                # 2. Check for Trigger
+                if log.get("error_code") is not None:
+                    print("!!! ERROR DETECTED !!! Switching to Capture Mode.")
+                    state = "COLLECTING_POST_ERROR"
+                    logs_needed_after_error = POST_ERROR_LOGS
+                    update_display("ERROR FOUND!", "Capturing Context")
+
+            elif state == "COLLECTING_POST_ERROR":
+                # We just accepted a log, so we need one less
+                logs_needed_after_error -= 1
+                
+                update_display("Capturing...", f"Need: {logs_needed_after_error}")
+                
+                if logs_needed_after_error <= 0:
+                    # WE ARE DONE!
+                    # The log_buffer now contains: ~20 pre, 1 error, 20 post
+                    send_package_to_llm(log_buffer, temp_history)
+                    
+                    # Reset
+                    log_buffer = [] # Clear buffer
+                    state = "MONITORING"
+                    update_display("Sent!", "Monitoring...")
+        
         time.sleep(POLL_DELAY)
 
 if __name__ == "__main__":
