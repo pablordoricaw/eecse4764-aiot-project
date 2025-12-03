@@ -91,3 +91,43 @@ More on the usage of `mpfshell` on [https://github.com/wendlers/mpfshell#shell-u
 - [Adafruit HUZZAH32 V2 Guide](https://learn.adafruit.com/adafruit-esp32-feather-v2)
 - [ESP32 Technical Reference Manual](https://www.espressif.com/sites/default/files/documentation/esp32_technical_reference_manual_en.pdf)
 - [MicroPython ESP32 Documentation](https://docs.micropython.org/en/latest/esp32/quickref.html)
+
+## Software
+
+### Dependencies
+
+For the project there is a single shared `pyproject.toml` file at the repository root to manage dependencies across the three components:
+
+1. Microcontroller code in `mcu/`
+2. Medical Device code in `medical_device/`
+3. LLM code in `llm/`
+
+> [!NOTE]
+> This project uses [uv](https://docs.astral.sh/uv/) for dependency and virtual environment management. Commands below are for `uv`. It is possible to use dependency and virtual environemnt management tools, but those are not listed below.
+>
+> Run these commands from the root project directory (where `pyproject.toml` is located), not from individual component directories.
+
+
+#### Shared Dependencies
+
+Install shared dependencies across the three components with:
+
+```bash
+uv sync
+```
+
+
+#### Component-Specific Dependencies
+
+Install the component specific dependencies using:
+
+```bash
+uv sync --group <component> # Replace <component> with mcu, llm, medical_device
+```
+
+And remove specific lab dependencies after you're done working on it:
+
+```bash
+uv sync --no-group <component> # Replace <component> with mcu, llm, medical_device
+```
+
