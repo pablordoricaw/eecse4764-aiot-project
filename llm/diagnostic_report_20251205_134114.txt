@@ -1,0 +1,120 @@
+======================================================================
+MEDICAL DEVICE DIAGNOSTIC REPORT
+======================================================================
+
+Report Generated: 2025-12-05 13:41:14
+Device ID: ventilator-01
+Context: TEST_CONNECTION_PACKET
+
+======================================================================
+ERROR SUMMARY
+======================================================================
+
+Error Code: E-TEMP-OVERHEAT
+Error Message: CRITICAL: Sensor temp exceeded 90C
+Timestamp: 2025-12-05T12:00:00.000Z
+Severity: ERROR
+
+======================================================================
+LOG SEQUENCE
+======================================================================
+
+Total logs: 3
+
+1. [INFO] 2025-12-05T12:00:00.000Z - System startup complete.
+2. [ERROR] 2025-12-05T12:00:00.000Z - CRITICAL: Sensor temp exceeded 90C <<< ERROR
+3. [WARN] 2025-12-05T12:00:00.000Z - Safety shutoff triggered.
+
+======================================================================
+TEMPERATURE DATA
+======================================================================
+
+Total samples: 5
+
+Min: 95.6°C
+Max: 96.2°C
+Avg: 95.9°C
+
+Sample readings:
+  2024-12-05 07:00:00: 96.1°C
+  2024-12-05 07:00:01: 95.6°C
+  2024-12-05 07:00:02: 95.8°C
+  2024-12-05 07:00:03: 96.2°C
+  2024-12-05 07:00:04: 95.8°C
+
+======================================================================
+LLM DIAGNOSTIC ANALYSIS
+======================================================================
+
+# Comprehensive Diagnostic Analysis
+
+## 1. FDA Error Code Interpretation
+### Error Code: E-TEMP-OVERHEAT
+- **Context**: This error indicates that a critical sensor temperature has exceeded regulatory safety limits, specifically exceeding 90°C.
+- **Regulatory Framework**:
+  - **IEC 62304**: This outlines the lifecycle requirements for medical device software, emphasizing the need for safety and risk management. The error indicates a failure in maintaining acceptable operating conditions, which could affect patient safety.
+  - **FDA 21 CFR Part 820**: This part mandates that manufacturers establish a quality management system to ensure device safety and effectiveness. The occurrence of an overheating condition necessitates a thorough investigation under this regulation.
+  
+### Risk Classification
+- **Severity**: The severity is classified as **Class II** (moderate risk), as the risk of patient harm is significant should the device fail under critical circumstances.
+
+## 2. Root Cause Analysis
+### Log Sequence Patterns
+- **Log Sequence**:
+  - The last INFO log indicates a normal system startup just moments before the error, indicating no prior issues that could have led to the overheating.
+  
+### Temperature Data Correlation
+- **Temperature Readings**: 
+  - All temperatures recorded exceed the critical threshold (90°C), indicating a systemic malfunction rather than a transient spike.
+- **Trends**: 
+  - Fluctuations around the 95°C mark directly correlate with the error timestamp.
+
+### Anomalies
+- No anomalies were detected in context logs prior to the error except for the temperature spike.
+
+### Potential Failure Modes
+- Sensor malfunction
+- Cooling system failure
+- Software error in temperature monitoring
+
+## 3. Troubleshooting Steps
+### Actionable Steps
+1. **Immediate Device Shutdown**
+   - **Action**: Power off the ventilator to prevent any injury or further damage.
+   - **Verification**: Ensure that the device does not display any operational lights or alarms after shutdown.
+
+2. **Inspect Cooling Mechanism**
+   - **Action**: Check for blockages or damage to the cooling components of the device.
+   - **Verification**: Confirm that the cooling system is operational and free of obstructions.
+
+3. **Sensor Inspection**
+   - **Action**: Review sensor connections and integrity. Replace if damaged or faulty.
+   - **Verification**: Use diagnostic tools to verify that the sensor operates within specifications post-inspection.
+
+4. **Review Calibration and Settings**
+   - **Action**: Check the calibration of the temperature sensor and software settings.
+   - **Verification**: Calibrate sensors according to manufacturer specifications.
+
+5. **Log Review and Analysis**
+   - **Action**: Analyze all system logs for any additional errors or inconsistencies.
+   - **Verification**: Record findings and ensure no unresolved errors remain post-analysis.
+
+## 4. Device Status Assessment
+### Current Device Status: **Unsafe - Stop Operation**
+- **Justification**: The overheating condition presents a significant risk to both patient and operator safety. Active operation under these conditions is unacceptable, and immediate corrective actions are necessary.
+- **Operational Limitations**: The ventilator should not be used until all troubleshooting steps have been completed, and the device passes all safety checks.
+
+## 5. Safety Recommendations
+### Immediate Actions
+- **Patient/Operator Safety**: Immediately cease operations and switch off the device to prevent overheating incidents. Ensure alternative ventilation support for patients is ready.
+  
+### Preventive Measures
+- Implement routine maintenance checks of temperature sensors and cooling systems.
+- Introduce regular software updates and validation checks.
+
+### Escalation Procedures
+- If the issue persists after following troubleshooting steps, notify biomedical engineering or service personnel immediately to conduct a comprehensive evaluation and repair of the device.
+
+======================================================================
+END OF REPORT
+======================================================================

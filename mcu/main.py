@@ -1,3 +1,10 @@
+# ==============================================================================
+# JASON'S FINAL SYSTEM (Light Sensor Simulating Temp)
+# ------------------------------------------------------------------------------
+# 1. Polls Mock Database for Logs (Port 8000)
+# 2. Reads Light Sensor as "Temperature" (Pin 34)
+# 3. If Database sends ERROR -> Captures context -> Sends to LLM (Port 5001)
+# ==============================================================================
 from machine import Pin, I2C, ADC
 import ssd1306
 import time
@@ -9,22 +16,26 @@ import ntptime # REQUIRED: To sync clock with internet
 # ------------------------------------------------------------------------------
 # 1. CONFIGURATION
 # ------------------------------------------------------------------------------
-WIFI_SSID = "Columbia University"
-# WIFI_PASS = "" 
+WIFI_SSID = "richard5iphone"
+WIFI_PASS = "Sergeant213" # <--- FILL THIS IN!
 
-# DATABASE & LLM
-DB_BASE_URL = "http://192.168.1.XXX:8000/logs"
+# SERVER CONFIGURATION (Using your Hotspot IP)
+# Mock Database (Pablo)
+DB_BASE_URL = "http://172.20.10.13:8000/logs" 
 DEVICE_ID   = "ventilator-01"
-LLM_URL     = "http://192.168.1.YYY:5000/api/ingest"
+
+# LLM Server (Richard)
+LLM_URL     = "http://172.20.10.13:5001/api/ingest"
 
 # RECORDING SETTINGS
 PRE_ERROR_LOGS  = 20
 POST_ERROR_LOGS = 20
-POLL_DELAY      = 1   # Faster polling to catch logs quickly
+POLL_DELAY      = 1.5   # Seconds between checks
 
 # ------------------------------------------------------------------------------
-# 2. HARDWARE SETUP
+# 2. HARDWARE SETUP (OLED + LIGHT SENSOR)
 # ------------------------------------------------------------------------------
+# OLED
 i2c = I2C(sda=Pin(22), scl=Pin(20))
 try:
     oled = ssd1306.SSD1306_I2C(128, 32, i2c)
@@ -32,15 +43,28 @@ try:
 except:
     HAS_SCREEN = False
 
-temp_adc = ADC(Pin(34))
-temp_adc.atten(ADC.ATTN_11DB) 
+# LIGHT SENSOR (ALS-PT19) on Pin 34
+# We use this to simulate temperature.
+# Dark = 20C, Bright Light = 100C
+light_sensor = ADC(Pin(32))
+light_sensor.atten(ADC.ATTN_11DB) # Full Range: 0 - 3.3V
 
-def read_sensor_temperature():
+def read_simulated_temperature():
+    """
+    Converts Light Intensity to Temperature.
+    0 (Dark)    -> ~20.0 C
+    4095 (Bright)-> ~100.0 C
+    """
     try:
-        raw_val = temp_adc.read()
-        return round(73.0 + ((raw_val % 20) / 10.0), 1)
+        raw_val = light_sensor.read() # 0 to 4095
+        
+        # Mapping Formula: Temp = Base + (Reading / Max) * Range
+        # 20C + (Value / 4095) * 80C
+        sim_temp = 20.0 + (raw_val / 4095.0) * 80.0
+        
+        return round(sim_temp, 1)
     except:
-        return 73.0
+        return 20.0
 
 def update_display(line1, line2):
     if not HAS_SCREEN: return
@@ -50,27 +74,20 @@ def update_display(line1, line2):
     oled.show()
 
 # ------------------------------------------------------------------------------
-# 3. TIME & PARSING HELPERS
+# 3. HELPERS
 # ------------------------------------------------------------------------------
 def sync_clock():
-    """Syncs ESP32 internal clock with internet time"""
     print("[TIME] Syncing NTP...")
     try:
-        ntptime.settime() # Sets internal RTC
-        print("[TIME] Synced!", time.localtime())
+        ntptime.settime() 
+        print("[TIME] Synced!")
     except:
-        print("[TIME] Sync failed")
+        print("[TIME] Failed (Will use relative time)")
 
 def parse_iso_simple(iso_str):
-    """
-    Rough parsing of ISO string to epoch seconds for comparison.
-    Format assumption: '2025-12-03T20:37:00.123Z'
-    """
     try:
-        # Remove fractional seconds and 'Z'
-        clean = iso_str.split('.')[0] # 2025-12-03T20:37:00
+        clean = iso_str.split('.')[0]
         parts = clean.replace('T', '-').replace(':', '-').split('-')
-        # parts: [Year, Mon, Day, Hour, Min, Sec]
         t_tuple = (int(parts[0]), int(parts[1]), int(parts[2]), 
                    int(parts[3]), int(parts[4]), int(parts[5]), 0, 0)
         return time.mktime(t_tuple)
@@ -84,15 +101,21 @@ def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if not wlan.isconnected():
-        wlan.connect(WIFI_SSID)
-        timeout = 10
+        print(f"Connecting to {WIFI_SSID}...")
+        wlan.connect(WIFI_SSID, WIFI_PASS)
+        timeout = 20
         while not wlan.isconnected() and timeout > 0:
             time.sleep(1)
             timeout -= 1
-    return wlan.isconnected()
+            print(".", end="")
+    
+    if wlan.isconnected():
+        print(f"\n[WiFi] IP: {wlan.ifconfig()[0]}")
+        return True
+    return False
 
 def fetch_logs(current_since):
-    # Fetch 1 at a time to keep logic simple and ordered
+    # Ask Mock DB for new logs
     url = f"{DB_BASE_URL}?device_id={DEVICE_ID}&limit=1&since={current_since}"
     try:
         res = urequests.get(url)
@@ -101,36 +124,29 @@ def fetch_logs(current_since):
             res.close()
             return data.get("logs", []), data.get("next_since", current_since)
         res.close()
-    except:
-        pass
+    except Exception as e:
+        print(f"[GET] DB Error: {e}")
     return [], current_since
 
 def send_package_to_llm(log_sequence, temp_history):
-    """
-    COMBINES Logs and Temps into one request
-    """
-    print(f"\n[POST] Packaging {len(log_sequence)} logs & Temp Data...")
+    print(f"\n[POST] Sending {len(log_sequence)} logs to LLM...")
     update_display("Packaging...", "Sending to LLM")
     
-    # 1. Determine Time Interval from the logs
-    first_log_time = parse_iso_simple(log_sequence[0].get('timestamp', ''))
-    last_log_time  = parse_iso_simple(log_sequence[-1].get('timestamp', ''))
+    # Filter temps to match log timeframe
+    first_ts = parse_iso_simple(log_sequence[0].get('timestamp', ''))
+    last_ts  = parse_iso_simple(log_sequence[-1].get('timestamp', ''))
     
-    # 2. Filter Temp History for this interval
     relevant_temps = []
-    for t_entry in temp_history:
-        # Allow a small buffer (e.g. +/- 2 seconds)
-        if t_entry['ts'] >= (first_log_time - 2) and t_entry['ts'] <= (last_log_time + 2):
-            relevant_temps.append(t_entry)
+    for t in temp_history:
+        # +/- 5 seconds buffer
+        if t['ts'] >= (first_ts - 5) and t['ts'] <= (last_ts + 5):
+            relevant_temps.append(t)
             
-    print(f"[POST] Found {len(relevant_temps)} temps in interval {first_log_time}-{last_log_time}")
-
-    # 3. Construct Payload
     payload = {
-        "context": "Error Event Packet",
+        "context": "Simulated Overheat Event",
         "device_id": DEVICE_ID,
-        "log_sequence": log_sequence,      # The 20 before + error + 20 after
-        "temperature_data": relevant_temps # The temps matching that timeframe
+        "log_sequence": log_sequence,
+        "temperature_data": relevant_temps
     }
     
     headers = {'Content-Type': 'application/json'}
@@ -140,82 +156,68 @@ def send_package_to_llm(log_sequence, temp_history):
         res.close()
         return True
     except Exception as e:
-        print(f"[POST] Failed: {e}")
+        print(f"[POST] LLM Error: {e}")
         return False
 
 # ------------------------------------------------------------------------------
-# 5. MAIN LOOP (STATE MACHINE)
+# 5. MAIN LOOP
 # ------------------------------------------------------------------------------
 def main():
     if not connect_wifi(): return
-    sync_clock() # Sync time so our temp timestamps match server logs
+    sync_clock()
     
-    # BUFFERS
-    # We keep temp history for safety (last ~300 entries / 10 mins)
     temp_history = [] 
-    
-    # We keep logs based on logic
     log_buffer = [] 
     
-    # STATE
-    # "MONITORING" or "COLLECTING_POST_ERROR"
     state = "MONITORING"
     logs_needed_after_error = 0
     
+    # Start looking for logs from roughly "now" (or a fixed past date to be safe)
     cursor_since = "2024-01-01T00:00:00.000Z" 
 
-    print("System Online. Buffering...")
+    print("System Online. Ready for Light/Temp Simulation.")
 
     while True:
-        # A. READ TEMP (Add to History)
-        # Store tuple: {ts: epoch_seconds, val: 73.0}
-        current_temp = read_sensor_temperature()
+        # A. READ SENSOR (Light -> Temp)
+        current_temp = read_simulated_temperature()
         temp_history.append({"ts": time.time(), "val": current_temp})
-        
-        # Keep temp buffer manageable (remove old > 500 items)
-        if len(temp_history) > 500:
-            temp_history.pop(0)
+        if len(temp_history) > 300: temp_history.pop(0)
 
-        # B. FETCH LOGS
+        # B. FETCH LOGS (From Mock DB)
         new_logs, next_since = fetch_logs(cursor_since)
         if next_since: cursor_since = next_since
 
         # C. PROCESS LOGS
         for log in new_logs:
-            # Add to our buffer
             log_buffer.append(log)
-            print(f"[LOG] {log.get('message', '')} [{state}]")
+            print(f"[LOG] {log.get('message', '')}")
 
-            # LOGIC ENGINE
             if state == "MONITORING":
-                # 1. Prune Buffer: We only need to keep 'PRE_ERROR_LOGS' 
-                # until we find an error.
-                if len(log_buffer) > PRE_ERROR_LOGS + 1: 
-                    log_buffer.pop(0) 
+                # Keep buffer small
+                if len(log_buffer) > PRE_ERROR_LOGS + 1: log_buffer.pop(0) 
 
-                # 2. Check for Trigger
+                # TRIGGER: Check if Mock DB sent an error
                 if log.get("error_code") is not None:
-                    print("!!! ERROR DETECTED !!! Switching to Capture Mode.")
+                    print("!!! ERROR DETECTED !!!")
                     state = "COLLECTING_POST_ERROR"
                     logs_needed_after_error = POST_ERROR_LOGS
-                    update_display("ERROR FOUND!", "Capturing Context")
+                    update_display("ERROR!", "Capturing...")
 
             elif state == "COLLECTING_POST_ERROR":
-                # We just accepted a log, so we need one less
                 logs_needed_after_error -= 1
-                
-                update_display("Capturing...", f"Need: {logs_needed_after_error}")
+                update_display("Capturing...", f"Left: {logs_needed_after_error}")
                 
                 if logs_needed_after_error <= 0:
-                    # WE ARE DONE!
-                    # The log_buffer now contains: ~20 pre, 1 error, 20 post
+                    # DONE! Send to LLM
                     send_package_to_llm(log_buffer, temp_history)
-                    
-                    # Reset
-                    log_buffer = [] # Clear buffer
+                    log_buffer = [] 
                     state = "MONITORING"
                     update_display("Sent!", "Monitoring...")
         
+        # Display Current Status
+        if state == "MONITORING":
+            update_display("Monitoring...", f"Temp: {current_temp}C")
+            
         time.sleep(POLL_DELAY)
 
 if __name__ == "__main__":

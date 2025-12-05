@@ -339,7 +339,8 @@ if __name__ == "__main__":
     print("  POST /api/ingest - Receive error packets from ESP32")
     print("  GET  /           - Server info")
     print("  GET  /health     - Health check")
-    print("\nStarting server on http://0.0.0.0:5000")
+    print("\nStarting server on http://0.0.0.0:5001")
     print("="*70 + "\n")
     
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    # CHANGED PORT FROM 5000 TO 5001 TO AVOID CONFLICT
+    uvicorn.run(app, host="0.0.0.0", port=5001)
