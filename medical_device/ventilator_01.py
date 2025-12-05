@@ -21,7 +21,6 @@ class JsonLineFormatter(logging.Formatter):
         super().__init__()
         self.fmt_keys = fmt_keys if fmt_keys is not None else {}
 
-    @override
     def format(self, record: logging.LogRecord) -> str:
         always_fields = {
             "timestamp": datetime.datetime.fromtimestamp(
@@ -30,18 +29,17 @@ class JsonLineFormatter(logging.Formatter):
         }
         if record.exc_info:
             always_fields["exc_info"] = self.formatException(record.exc_info)
-
         if record.stack_info:
-            always_fields["stack_info"] = self.formatException(record.stack_info)
+            always_fields["stack_info"] = record.stack_info  # already a string
 
-        message = {
-            key: msg_val
-            if (msg_val := always_fields.pop(val, None)) is not None
-            else getattr(record, val)
-            for key, val in self.fmt_keys.items()
-        }
+        message = {}
+        for key, attr_name in self.fmt_keys.items():
+            if attr_name in always_fields:
+                message[key] = always_fields.pop(attr_name)
+            else:
+                message[key] = getattr(record, attr_name, None)
+
         message.update(always_fields)
-
         return json.dumps(message, ensure_ascii=False)
 
 
@@ -51,12 +49,27 @@ class NonErrorFilter(logging.Filter):
         return record.levelno <= logging.INFO
 
 
+class VentilatorLoggerAdapter(logging.LoggerAdapter):
+    @override
+    def process(self, msg, kwargs):
+        extra = kwargs.setdefault("extra", {})
+        extra.setdefault("device_id", "ventilator-01")
+        extra.setdefault("event_type", "UNKNOWN")
+        extra.setdefault("event_code", "NONE")
+        extra.setdefault("subsystem", "GENERAL")
+        return msg, kwargs
+
+
 logging_config = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
         "simple": {
-            "format": "[%(asctime)s][%(levelname)s]: %(message)s",
+            "format": "[%(asctime)s][%(levelname)s]"
+            "[%(device_id)s]"
+            "[%(event_type)s]"
+            "[%(event_code)s]"
+            "[%(subsystem)s]: %(message)s",
             "datefmt": "%Y-%m-%dT%H:%M:%S%z",
         },
         "jsonl": {
@@ -70,6 +83,10 @@ logging_config = {
                 "function": "funcName",
                 "line": "lineno",
                 "thread_name": "threadName",
+                "device_id": "device_id",
+                "event_type": "event_type",
+                "event_code": "event_code",
+                "subsystem": "subsystem",
             },
         },
     },
@@ -116,12 +133,12 @@ def jsonl_file_namer(default_name: str) -> str:
     the logging handler, which is the configured base filename from the
     logging_config above with a numeric suffix appended,
 
-    i.e., `logs/ventilator.log.jsonl.1`.
+    i.e., `logs/ventilator.log.jsonl` and `logs/ventilator.log.jsonl.1`.
     """
     dirname, basename = os.path.split(default_name)
     parts = basename.split(".")
 
-    if len(parts) < 4:
+    if len(parts) < 3:
         return default_name
 
     base = parts[0]  # 'ventilator'
@@ -132,7 +149,7 @@ def jsonl_file_namer(default_name: str) -> str:
     return os.path.join(dirname, new_basename)
 
 
-def setup_logging(config=logging_config) -> logging.Logger:
+def setup_logging(config=logging_config) -> logging.LoggerAdapter:
     """
     Initialize and configure logging.
 
@@ -151,14 +168,12 @@ def setup_logging(config=logging_config) -> logging.Logger:
     """
     logger = logging.getLogger("ventilator-01")
 
-    ts = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
-    base_name = f"ventilator.{ts}.log.jsonl"
     json_handler_cfg = config["handlers"]["jsonl_file"]
     dirname, _ = os.path.split(json_handler_cfg["filename"])
     if dirname:
         os.makedirs(dirname, exist_ok=True)
 
-    json_handler_cfg["filename"] = os.path.join(dirname, base_name)
+    json_handler_cfg["filename"] = jsonl_file_namer(json_handler_cfg["filename"])
 
     logging.config.dictConfig(logging_config)
     queue_handler = logging.getHandlerByName("queue_handler")
@@ -169,7 +184,9 @@ def setup_logging(config=logging_config) -> logging.Logger:
                 h.namer = jsonl_file_namer
         queue_handler.listener.start()
         atexit.register(queue_handler.listener.stop)
-    return logger
+
+    adapter = VentilatorLoggerAdapter(logger, {})
+    return adapter
 
 
 ###############################################################################
@@ -200,6 +217,14 @@ def main():
     # TODO: Simulate ventilator functionality
 
     logger.info("info message")
+    logger.info(
+        "pressure alarm",
+        extra={
+            "event_type": "ALARM",
+            "event_code": "VENT_ALARM_12",
+            "subsystem": "PRESSURE",
+        },
+    )
     logger.warning("warning message")
     logger.error("error message")
     logger.critical("critical message")
