@@ -1,8 +1,3 @@
-"""
-Stage 3: RAG + Few-Shot with Poe API
-Uses BioBERT for similarity search + GPT-4o-mini for diagnosis
-"""
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
@@ -13,8 +8,9 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-import pandas as pd
+import json
 from tqdm import tqdm
+import re
 
 app = FastAPI(title="Medical Device Diagnostic - RAG + Few-Shot")
 
@@ -23,6 +19,7 @@ app = FastAPI(title="Medical Device Diagnostic - RAG + Few-Shot")
 # ==============================================================================
 POE_API_KEY = "aA_SPfposL5Zgrm3qft9ufaalxrjpkZdvElonE2lG4w"
 LLM_MODEL = "GPT-4o-Mini"
+TRAINING_DATA_PATH = "medical_device_training.jsonl"
 
 # ==============================================================================
 # DATA MODELS
@@ -57,16 +54,61 @@ biobert_model = AutoModel.from_pretrained(MODEL_NAME).to('cuda' if torch.cuda.is
 biobert_model.eval()
 print(f"BioBERT loaded on: {'GPU' if torch.cuda.is_available() else 'CPU'}")
 
-# Load training data
-print("Loading training data...")
+# Load training data from JSONL
+print(f"Loading training data from {TRAINING_DATA_PATH}...")
+training_data = []
 try:
-    df = pd.read_excel("medical_device_training_data.xlsx")
-    print(f"Loaded {len(df)} training samples")
+    with open(TRAINING_DATA_PATH, 'r') as f:
+        for line in f:
+            data = json.loads(line)
+            training_data.append(data)
+    print(f"Loaded {len(training_data)} training samples")
     HAS_TRAINING_DATA = True
 except Exception as e:
     print(f"Warning: Could not load training data: {e}")
-    df = None
+    training_data = []
     HAS_TRAINING_DATA = False
+
+def extract_error_info(user_message):
+    """Extract key info from user message for embedding"""
+    # Extract error code
+    error_code_match = re.search(r'Error Code: (ERROR \d+)', user_message)
+    error_code = error_code_match.group(1) if error_code_match else "UNKNOWN"
+    
+    # Extract device type
+    device_match = re.search(r'Device ID: (\w+)-training', user_message)
+    device_type = device_match.group(1) if device_match else "unknown_device"
+    
+    # Extract temperature range
+    temp_match = re.search(r'Range: ([\d.]+)°C - ([\d.]+)°C', user_message)
+    if temp_match:
+        temp_min = float(temp_match.group(1))
+        temp_max = float(temp_match.group(2))
+        temp_avg = (temp_min + temp_max) / 2
+    else:
+        temp_avg = 25.0
+    
+    return error_code, device_type, temp_avg
+
+def extract_diagnosis_summary(assistant_message):
+    """Extract key diagnosis info from assistant response"""
+    # Extract FDA code
+    fda_match = re.search(r'FDA Error Code: ([^\n]+)', assistant_message)
+    fda_code = fda_match.group(1).strip() if fda_match else "Unknown"
+    
+    # Extract severity
+    severity_match = re.search(r'Severity: (\w+)', assistant_message)
+    severity = severity_match.group(1) if severity_match else "Unknown"
+    
+    # Extract root cause (first line of root cause section)
+    cause_match = re.search(r'Primary cause: ([^\n|]+)', assistant_message)
+    root_cause = cause_match.group(1).strip() if cause_match else "Unknown"
+    
+    # Extract troubleshooting (first step)
+    troubleshoot_match = re.search(r'1\. ([^\n|]+)', assistant_message)
+    troubleshooting = troubleshoot_match.group(1).strip() if troubleshoot_match else "Unknown"
+    
+    return fda_code, severity, root_cause, troubleshooting
 
 def embed_text(text):
     """Generate BioBERT embedding"""
@@ -78,19 +120,45 @@ def embed_text(text):
 
 # Create training embeddings at startup
 TRAINING_EMBEDDINGS = None
+TRAINING_INFO = []
+
 if HAS_TRAINING_DATA:
     print("Creating embeddings for training data...")
     training_texts = []
-    for _, row in df.iterrows():
-        text = f"Error: {row['error_code']}, Device: {row['device_type']}, Temp: {row['temperature']}°C"
+    
+    for sample in training_data:
+        # Extract user and assistant messages
+        messages = sample.get('messages', [])
+        user_msg = next((m['content'] for m in messages if m['role'] == 'user'), '')
+        assistant_msg = next((m['content'] for m in messages if m['role'] == 'assistant'), '')
+        
+        # Extract structured info
+        error_code, device_type, temp_avg = extract_error_info(user_msg)
+        fda_code, severity, root_cause, troubleshooting = extract_diagnosis_summary(assistant_msg)
+        
+        # Create embedding text
+        text = f"Error: {error_code}, Device: {device_type}, Temp: {temp_avg:.1f}°C"
         training_texts.append(text)
+        
+        # Store structured info
+        TRAINING_INFO.append({
+            'error_code': error_code,
+            'device_type': device_type,
+            'temperature': temp_avg,
+            'fda_code': fda_code,
+            'severity': severity,
+            'root_cause': root_cause,
+            'troubleshooting': troubleshooting,
+            'full_user_msg': user_msg[:500],  # Store snippet
+            'full_assistant_msg': assistant_msg[:500]
+        })
     
     embeddings = []
     for text in tqdm(training_texts, desc="Embeddings"):
         embeddings.append(embed_text(text))
     
     TRAINING_EMBEDDINGS = np.vstack(embeddings)
-    print("Embeddings ready!")
+    print(f"Embeddings ready! ({len(TRAINING_INFO)} cases indexed)")
 
 def find_similar_cases(error_log, temps, top_k=3):
     """Find similar historical cases using BioBERT"""
@@ -108,15 +176,16 @@ def find_similar_cases(error_log, temps, top_k=3):
     
     similar_cases = []
     for idx in top_indices:
+        info = TRAINING_INFO[idx]
         similar_cases.append({
             "similarity": float(similarities[idx]),
-            "error_code": df.iloc[idx]['error_code'],
-            "device_type": df.iloc[idx]['device_type'],
-            "temperature": df.iloc[idx]['temperature'],
-            "severity": df.iloc[idx]['severity_level'],
-            "fda_code": df.iloc[idx]['fda_error_code'],
-            "diagnosis": df.iloc[idx]['diagnostic_hypothesis'][:200],
-            "troubleshooting": df.iloc[idx]['troubleshooting_steps'][:200]
+            "error_code": info['error_code'],
+            "device_type": info['device_type'],
+            "temperature": info['temperature'],
+            "severity": info['severity'],
+            "fda_code": info['fda_code'],
+            "root_cause": info['root_cause'],
+            "troubleshooting": info['troubleshooting']
         })
     
     return similar_cases
@@ -242,10 +311,10 @@ Diagnosis:
         for i, case in enumerate(similar_cases, 1):
             prompt += f"""Case {i} (Similarity: {case['similarity']:.1%}):
 - Error: {case['error_code']} | Device: {case['device_type']}
-- Temperature: {case['temperature']}°C | Severity: {case['severity']}
+- Temperature: {case['temperature']:.1f}°C | Severity: {case['severity']}
 - FDA Code: {case['fda_code']}
-- Diagnosis: {case['diagnosis']}...
-- Troubleshooting: {case['troubleshooting']}...
+- Root Cause: {case['root_cause']}
+- Troubleshooting: {case['troubleshooting']}
 
 """
 
@@ -348,7 +417,7 @@ def save_diagnostic_report(packet: ErrorPacket, diagnosis: str, similar_cases: l
     with open(filename, 'w') as f:
         f.write("="*70 + "\n")
         f.write("MEDICAL DEVICE DIAGNOSTIC REPORT\n")
-        f.write("Model: RAG + Few-Shot with GPT-4o-mini\n")
+        f.write("Model: RAG + Few-Shot with GPT-4o-mini + BioBERT\n")
         f.write("="*70 + "\n\n")
         
         f.write(f"Report Generated: {datetime.now()}\n")
@@ -366,7 +435,9 @@ def save_diagnostic_report(packet: ErrorPacket, diagnosis: str, similar_cases: l
             f.write("-"*70 + "\n")
             for i, case in enumerate(similar_cases, 1):
                 f.write(f"{i}. {case['error_code']} (similarity: {case['similarity']:.1%})\n")
-                f.write(f"   Severity: {case['severity']}, FDA Code: {case['fda_code']}\n\n")
+                f.write(f"   Device: {case['device_type']}, Temp: {case['temperature']:.1f}°C\n")
+                f.write(f"   Severity: {case['severity']}, FDA Code: {case['fda_code']}\n")
+                f.write(f"   Root Cause: {case['root_cause']}\n\n")
         
         f.write("\n" + "="*70 + "\n")
         f.write("LLM DIAGNOSTIC ANALYSIS\n")
@@ -423,6 +494,7 @@ async def ingest_error_packet(packet: ErrorPacket):
         "report_file": filename,
         "model": "RAG + Few-Shot (BioBERT + GPT-4o-mini)",
         "similar_cases_used": len(similar_cases),
+        "similar_cases": similar_cases,
         "approach": "hybrid_rag_fewshot"
     }
 
@@ -431,7 +503,7 @@ def root():
     return {
         "service": "Medical Device Diagnostic - RAG + Few-Shot",
         "model": "BioBERT (RAG) + GPT-4o-mini (Few-Shot)",
-        "training_samples": len(df) if HAS_TRAINING_DATA else 0,
+        "training_samples": len(training_data) if HAS_TRAINING_DATA else 0,
         "status": "operational"
     }
 
@@ -445,12 +517,17 @@ def health_check():
 
 if __name__ == "__main__":
     print("\n" + "="*70)
-    print("Stage 3: RAG + Few-Shot Medical Device Diagnostic")
+    print("Medical Device Diagnostic Server - RAG + Few-Shot")
     print("="*70)
-    print(f"\nApproach: BioBERT (RAG) + GPT-4o-mini (Few-Shot)")
-    print(f"Training Data: {len(df) if HAS_TRAINING_DATA else 0} samples")
-    print(f"LLM: {LLM_MODEL} via Poe API")
-    print("\nStarting server on http://0.0.0.0:5000")
+    print(f"\nLLM Model: {LLM_MODEL}")
+    print(f"BioBERT Model: {MODEL_NAME}")
+    print(f"Training Data: {TRAINING_DATA_PATH}")
+    print(f"Training Samples: {len(training_data) if HAS_TRAINING_DATA else 0}")
+    print("\nEndpoints:")
+    print("  POST /api/ingest - Receive error packets from ESP32")
+    print("  GET  /           - Server info")
+    print("  GET  /health     - Health check")
+    print("\nStarting server on http://0.0.0.0:5001")
     print("="*70 + "\n")
     
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    uvicorn.run(app, host="0.0.0.0", port=5001)
