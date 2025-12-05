@@ -1,7 +1,11 @@
+# ==============================================================================
+# MOCK DATABASE SERVER (Quiet Mode)
+# Only prints BIG alerts when an error occurs.
+# ==============================================================================
 from flask import Flask, request, jsonify
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import random
-import time
+import sys
 
 app = Flask(__name__)
 
@@ -10,14 +14,11 @@ PORT = 8000
 DEVICE_ID = "ventilator-01"
 
 def get_utc_now_iso():
-    """Returns current time in ISO-8601 format with milliseconds"""
     return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
 def generate_random_log(req_device_id):
-    """Generates a single random log entry"""
-    
-    # 10% chance of an error, 90% chance of normal info
-    is_error = random.random() < 0.1
+    # CHANGED: Lowered error chance to 5% so you have time to react
+    is_error = random.random() < 0.05 
     
     timestamp = get_utc_now_iso()
     
@@ -27,8 +28,8 @@ def generate_random_log(req_device_id):
             "device_id": req_device_id,
             "level": "ERROR",
             "event_type": "ERROR_EVENT",
-            "error_code": random.choice(["E-TEMP-HIGH", "E-PRESSURE-LOW", "E-SENSOR-FAIL"]),
-            "message": "Critical fault detected in sensor array."
+            "error_code": "E-TEMP-HIGH", # Force the Overheat error for demo
+            "message": "Critical fault: Temperature threshold exceeded."
         }
     else:
         return {
@@ -36,47 +37,36 @@ def generate_random_log(req_device_id):
             "device_id": req_device_id,
             "level": "INFO",
             "event_type": "MEASUREMENT",
-            "error_code": None, # Null for normal logs
-            "message": f"Routine measurement check. Status: OK. Cycle: {random.randint(100,999)}"
+            "error_code": None,
+            "message": f"System nominal. Cycle: {random.randint(100,999)}"
         }
 
 @app.route('/logs', methods=['GET'])
 def get_logs():
-    """
-    Simulates: GET /logs?device_id=...&since=...&limit=...
-    """
-    # 1. Parse Query Parameters
     device_id = request.args.get('device_id', 'unknown')
-    since = request.args.get('since', '')
-    limit = int(request.args.get('limit', 10))
-
-    print(f"\n[REQ] ESP32 asked for logs since: {since}")
-
-    # 2. Logic to "fake" new data
-    # In a real DB, we would query SQL. 
-    # Here, we just generate a NEW log right now to feed the ESP32.
-    
-    # To prevent flooding, if the ESP32 asks too fast, we might return nothing sometimes.
-    # But for testing, let's always give 1 new log.
     
     new_log = generate_random_log(device_id)
     
-    # 3. Construct Response
     response = {
         "logs": [new_log],
-        "next_since": new_log['timestamp'] # The pointer for the next request
+        "next_since": new_log['timestamp']
     }
 
-    # Print to console so you can see what's happening
+    # === VISUAL IMPROVEMENT ===
     if new_log['level'] == 'ERROR':
-        print(f"   >>> SENDING ERROR: {new_log['error_code']}")
+        # Print a massive banner when an error happens
+        print("\n" + "!"*60)
+        print(f" >>> SENDING ERROR: {new_log['error_code']}")
+        print(f" >>> SHINE FLASHLIGHT NOW!")
+        print("!"*60 + "\n")
     else:
-        print(f"   >>> Sending Info: {new_log['message']}")
+        # Just print a dot for normal info to keep terminal clean
+        print(".", end="", flush=True)
 
     return jsonify(response)
 
 if __name__ == '__main__':
-    # 0.0.0.0 allows external access (from ESP32)
-    print(f"Mock Database running on port {PORT}...")
-    print(f"Update your ESP32 'DB_BASE_URL' to: http://<YOUR_LAPTOP_IP>:{PORT}/logs")
+    # 0.0.0.0 allows external access
+    print(f"Mock DB running on Port {PORT}...")
+    print("Waiting for ESP32...")
     app.run(host='0.0.0.0', port=PORT)
