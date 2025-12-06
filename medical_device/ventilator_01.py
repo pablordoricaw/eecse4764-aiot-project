@@ -12,6 +12,8 @@ import time
 from enum import Enum
 from typing import override
 
+from utils import setup_base_logging
+
 ###############################################################################
 # Logging Utils
 ###############################################################################
@@ -67,14 +69,6 @@ logging_config = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "simple": {
-            "format": "[%(asctime)s][%(levelname)s]"
-            "[%(device_id)s]"
-            "[%(event_type)s]"
-            "[%(event_code)s]"
-            "[%(subsystem)s]: %(message)s",
-            "datefmt": "%Y-%m-%dT%H:%M:%S%z",
-        },
         "jsonl": {
             "()": f"{__name__}.JsonLineFormatter",
             "fmt_keys": {
@@ -88,35 +82,36 @@ logging_config = {
             },
         },
     },
-    "filters": {"no_errors": {"()": f"{__name__}.NonErrorFilter"}},
+    "filters": {
+        "no_errors": {
+            "()": f"{__name__}.NonErrorFilter",
+        },
+    },
     "handlers": {
-        "stdout": {
-            "class": "logging.StreamHandler",
-            "formatter": "simple",
-            "filters": ["no_errors"],
-            "stream": "ext://sys.stdout",
-        },
-        "stderr": {
-            "class": "logging.StreamHandler",
-            "formatter": "simple",
-            "stream": "ext://sys.stderr",
-            "level": "WARNING",
-        },
         "jsonl_file": {
             "class": "logging.handlers.RotatingFileHandler",
             "formatter": "jsonl",
             "filename": "logs/ventilator.latest.log.jsonl",
-            "maxBytes": 10_000,
+            "maxBytes": 2_000,
             "backupCount": 50,
             "encoding": "utf-8",
         },
         "queue_handler": {
             "class": "logging.handlers.QueueHandler",
-            "handlers": ["stdout", "stderr", "jsonl_file"],
+            # Python 3.12+: 'handlers' here are the targets for the QueueListener
+            "handlers": ["jsonl_file"],
             "respect_handler_level": True,
         },
     },
-    "loggers": {"root": {"level": "DEBUG", "handlers": ["queue_handler"]}},
+    "loggers": {
+        # Attach the queue_handler to the ventilator logger only;
+        # console handlers come from logs_utils.setup_base_logging().
+        "ventilator-01": {
+            "level": "DEBUG",
+            "handlers": ["queue_handler"],
+            "propagate": True,
+        },
+    },
 }
 
 
@@ -127,20 +122,28 @@ def jsonl_file_namer(default_name: str) -> str:
     return os.path.join(dirname, new_basename)
 
 
-def setup_logging(config=logging_config) -> logging.LoggerAdapter:
+def setup_logging() -> VentilatorLoggerAdapter:
     """
-    Initialize and configure logging.
-    """
-    logger = logging.getLogger("ventilator-01")
+    Initialize logging for the ventilator:
 
-    json_handler_cfg = config["handlers"]["jsonl_file"]
+    - Configure base console logging (stdout/stderr) via logs_utils.setup_base_logging.
+    - Add JSONL rotating file handler + QueueHandler/QueueListener.
+    - Wrap the ventilator logger with VentilatorLoggerAdapter to inject device fields.
+    """
+    # 1) Configure shared console logging (stdout/stderr)
+    setup_base_logging()
+
+    # 2) Ensure JSONL logs directory exists
+    json_handler_cfg = logging_config["handlers"]["jsonl_file"]
     dirname, _ = os.path.split(json_handler_cfg["filename"])
     if dirname:
         os.makedirs(dirname, exist_ok=True)
 
+    # 3) Apply ventilator-specific logging config (adds queue_handler + jsonl_file)
     logging.config.dictConfig(logging_config)
-    queue_handler = logging.getHandlerByName("queue_handler")
 
+    # 4) Configure rotation namer on the RotatingFileHandler inside the QueueListener
+    queue_handler = logging.getHandlerByName("queue_handler")
     if queue_handler is not None and hasattr(queue_handler, "listener"):
         for h in queue_handler.listener.handlers:
             if isinstance(h, logging.handlers.RotatingFileHandler):
@@ -148,7 +151,10 @@ def setup_logging(config=logging_config) -> logging.LoggerAdapter:
         queue_handler.listener.start()
         atexit.register(queue_handler.listener.stop)
 
-    adapter = VentilatorLoggerAdapter(logger, {})
+    # 5) Get the ventilator logger and wrap it with the adapter
+    base_logger = logging.getLogger("ventilator-01")
+    adapter = VentilatorLoggerAdapter(base_logger, {})
+
     return adapter
 
 
@@ -455,7 +461,7 @@ def main() -> None:
     try:
         simulate_normal_operation(
             num_breaths=args.num_breaths,
-            breath_period_s=3.75,
+            breath_period_s=2.75,
             fault_interval=args.fault_interval,
             fault_probability=args.fault_probability,
             overheat_probability=args.overheat_probability,
