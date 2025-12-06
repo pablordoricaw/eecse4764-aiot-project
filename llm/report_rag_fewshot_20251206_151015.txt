@@ -1,0 +1,62 @@
+======================================================================
+MEDICAL DEVICE DIAGNOSTIC REPORT
+Model: RAG + Few-Shot with GPT-4o-mini + BioBERT
+======================================================================
+
+Report Generated: 2025-12-06 15:10:15.030671
+Device ID: ventilator-01
+
+ERROR SUMMARY
+----------------------------------------------------------------------
+Error Code: E-TEMP-HIGH
+Message: Critical fault: Temperature threshold exceeded.
+Timestamp: 2025-12-06T20:09:29.998Z
+
+SIMILAR HISTORICAL CASES (RAG)
+----------------------------------------------------------------------
+1. ERROR 1 (similarity: 97.0%)
+   Device: temperature_sensor, Temp: 26.6°C
+   Severity: Critical, FDA Code: Communication Failure (COM-788)
+   Root Cause: USB cable disconnection. Contributing factors: Possible environmental interference or component degradation. Confidence level: 80%
+
+2. ERROR 1 (similarity: 96.9%)
+   Device: temperature_sensor, Temp: 25.6°C
+   Severity: Medium, FDA Code: Communication Failure (COM-862)
+   Root Cause: USB cable disconnection. Contributing factors: Possible environmental interference or component degradation. Confidence level: 78%
+
+3. ERROR 3 (similarity: 96.8%)
+   Device: temperature_sensor, Temp: 49.4°C
+   Severity: Critical, FDA Code: Temperature Regulation Failure (TMF-622)
+   Root Cause: Ambient temperature too high causing elevated operating temperature. Contributing factors: Possible extended duty cycle or inadequate ventilation. Confidence level: 91%
+
+
+======================================================================
+LLM DIAGNOSTIC ANALYSIS
+======================================================================
+
+## FDA ERROR CLASSIFICATION
+- **FDA Error Code:** Thermal Management Failure (TMF-004)
+- **Severity:** Critical
+- **Device Status:** Malfunctioning
+
+## ROOT CAUSE ANALYSIS
+- **Primary Cause:** Overheating due to inadequate cooling or ventilation.
+- **Contributing Factors:** Extended duty cycle, possible blockage of cooling vents.
+- **Evidence from logs:** The logs show consistent “System nominal” messages leading up to the error, suggesting stable operation before a sudden temperature spike. Following the error, the logs still indicate nominal status, which may imply a lag in sensor reading or intermittent fault.
+- **Evidence from temperature:** The temperature readings indicate a rising trend from 58.8°C to 93.8°C over 37 samples, with an average of 61.3°C which is significantly high for operational parameters.
+- **Confidence:** 85%
+
+## TROUBLESHOOTING STEPS
+1. **IMMEDIATE:** Power down the device to prevent further escalation.
+2. **DIAGNOSTIC:** Inspect cooling fans and ventilation ports for blockages or degradation.
+3. **CORRECTIVE:** Replace any faulty cooling components identified during inspection.
+4. **PREVENTIVE:** Schedule regular maintenance checks and ensure adequate airflow around the device.
+
+## SAFETY ASSESSMENT
+- **Patient Risk:** High
+- **Continue Use:** No
+- **Escalate:** Immediate action required if patient support is dependent on the ventilator. Consider alternative arrangements for patient care.
+
+======================================================================
+END OF REPORT
+======================================================================
