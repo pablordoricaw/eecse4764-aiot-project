@@ -1,23 +1,24 @@
 # ==============================================================================
-# JASON'S FINAL SYSTEM (Light Sensor Simulating Temp)
+# JASON'S FINAL SYSTEM (Real Temperature Sensor - Si7021)
 # ------------------------------------------------------------------------------
 # 1. Polls Mock Database for Logs (Port 8000)
-# 2. Reads Light Sensor as "Temperature" (Pin 34)
+# 2. Reads REAL Temperature from Si7021 Sensor
 # 3. If Database sends ERROR -> Captures context -> Sends to LLM (Port 5001)
 # ==============================================================================
-from machine import Pin, I2C, ADC
+from machine import Pin, I2C
 import ssd1306
+from si7021 import Si7021
 import time
 import network
 import ujson
 import urequests
-import ntptime # REQUIRED: To sync clock with internet
+import ntptime
 
 # ------------------------------------------------------------------------------
 # 1. CONFIGURATION
 # ------------------------------------------------------------------------------
 WIFI_SSID = "parzival"
-WIFI_PASSWORD = "82cmez3b3l18" # <--- FILL THIS IN!
+WIFI_PASS = "82cmez3b3l18"
 
 # SERVER CONFIGURATION (Using your Hotspot IP)
 # Mock Database 
@@ -33,38 +34,62 @@ POST_ERROR_LOGS = 20
 POLL_DELAY      = 1.5   # Seconds between checks
 
 # ------------------------------------------------------------------------------
-# 2. HARDWARE SETUP (OLED + LIGHT SENSOR)
+# 2. HARDWARE SETUP (OLED + Si7021 Temperature Sensor)
 # ------------------------------------------------------------------------------
-# OLED
+# Enable power to STEMMA QT / I2C port (required for ESP32 Feather V2)
+i2c_power = Pin(2, Pin.OUT)
+i2c_power.value(1)
+time.sleep(0.1)  # Give sensor time to power up
+
+# I2C Bus - shared by OLED (0x3C) and Si7021 (0x40)
+# Using pins: SDA=22, SCL=20 (same as your original code)
 i2c = I2C(sda=Pin(22), scl=Pin(20))
+
+# OLED Display
 try:
     oled = ssd1306.SSD1306_I2C(128, 32, i2c)
     HAS_SCREEN = True
 except:
     HAS_SCREEN = False
+    print("[WARN] OLED not found")
 
-# LIGHT SENSOR (ALS-PT19) on Pin 34
-# We use this to simulate temperature.
-# Dark = 20C, Bright Light = 100C
-light_sensor = ADC(Pin(32))
-light_sensor.atten(ADC.ATTN_11DB) # Full Range: 0 - 3.3V
+# Si7021 Temperature & Humidity Sensor
+try:
+    temp_sensor = Si7021(i2c)
+    HAS_TEMP_SENSOR = True
+    print("[OK] Si7021 Temperature Sensor initialized")
+except Exception as e:
+    HAS_TEMP_SENSOR = False
+    print(f"[WARN] Si7021 not found: {e}")
 
-def read_simulated_temperature():
+def read_temperature():
     """
-    Converts Light Intensity to Temperature.
-    0 (Dark)    -> ~20.0 C
-    4095 (Bright)-> ~100.0 C
+    Reads REAL temperature from Si7021 sensor.
+    Returns temperature in Celsius.
+    Falls back to 20.0 if sensor not available.
     """
-    try:
-        raw_val = light_sensor.read() # 0 to 4095
-        
-        # Mapping Formula: Temp = Base + (Reading / Max) * Range
-        # 20C + (Value / 4095) * 80C
-        sim_temp = 20.0 + (raw_val / 4095.0) * 80.0
-        
-        return round(sim_temp, 1)
-    except:
+    if not HAS_TEMP_SENSOR:
         return 20.0
+    try:
+        temp_c = temp_sensor.read_temperature()
+        return round(temp_c, 1)
+    except Exception as e:
+        print(f"[ERR] Temp read failed: {e}")
+        return 20.0
+
+def read_humidity():
+    """
+    Reads relative humidity from Si7021 sensor.
+    Returns humidity in %.
+    """
+    if not HAS_TEMP_SENSOR:
+        return 50.0
+    try:
+        rh = temp_sensor.read_humidity()
+        return round(rh, 1)
+    except Exception as e:
+        print(f"[ERR] Humidity read failed: {e}")
+        return 50.0
 
 def update_display(line1, line2):
     if not HAS_SCREEN: return
@@ -143,7 +168,7 @@ def send_package_to_llm(log_sequence, temp_history):
             relevant_temps.append(t)
             
     payload = {
-        "context": "Simulated Overheat Event",
+        "context": "Temperature Event from Si7021 Sensor",
         "device_id": DEVICE_ID,
         "log_sequence": log_sequence,
         "temperature_data": relevant_temps
@@ -166,6 +191,12 @@ def main():
     if not connect_wifi(): return
     sync_clock()
     
+    # Scan I2C bus to verify devices
+    print("[I2C] Scanning bus...")
+    devices = i2c.scan()
+    print(f"[I2C] Found devices: {[hex(d) for d in devices]}")
+    # Expected: 0x3c (OLED) and 0x40 (Si7021)
+    
     temp_history = [] 
     log_buffer = [] 
     
@@ -175,12 +206,17 @@ def main():
     # Start looking for logs from roughly "now" (or a fixed past date to be safe)
     cursor_since = "2024-01-01T00:00:00.000Z" 
 
-    print("System Online. Ready for Light/Temp Simulation.")
+    print("System Online. Reading REAL temperature from Si7021.")
 
     while True:
-        # A. READ SENSOR (Light -> Temp)
-        current_temp = read_simulated_temperature()
-        temp_history.append({"ts": time.time(), "val": current_temp})
+        # A. READ SENSOR (Real Temperature from Si7021)
+        current_temp = read_temperature()
+        current_humidity = read_humidity()
+        # Server expects: {"ts": float, "val": float}
+        temp_history.append({
+            "ts": time.time(), 
+            "val": current_temp
+        })
         if len(temp_history) > 300: temp_history.pop(0)
 
         # B. FETCH LOGS (From Mock DB)
@@ -216,7 +252,7 @@ def main():
         
         # Display Current Status
         if state == "MONITORING":
-            update_display("Monitoring...", f"Temp: {current_temp}C")
+            update_display("Monitoring...", f"T:{current_temp}C H:{current_humidity}%")
             
         time.sleep(POLL_DELAY)
 

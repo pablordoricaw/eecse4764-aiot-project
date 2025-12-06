@@ -1,0 +1,150 @@
+======================================================================
+MEDICAL DEVICE DIAGNOSTIC REPORT
+======================================================================
+
+Report Generated: 2025-12-06 16:26:37
+Device ID: ventilator-01
+Context: Temperature Event from Si7021 Sensor
+
+======================================================================
+ERROR SUMMARY
+======================================================================
+
+Error Code: E-TEMP-HIGH
+Error Message: Critical fault: Temperature threshold exceeded.
+Timestamp: 2025-12-06T21:25:42.074Z
+Severity: ERROR
+
+======================================================================
+LOG SEQUENCE
+======================================================================
+
+Total logs: 21
+
+1. [ERROR] 2025-12-06T21:25:42.074Z - Critical fault: Temperature threshold exceeded. <<< ERROR
+2. [INFO] 2025-12-06T21:25:43.838Z - System nominal. Cycle: 832
+3. [INFO] 2025-12-06T21:25:45.792Z - System nominal. Cycle: 528
+4. [ERROR] 2025-12-06T21:25:47.595Z - Critical fault: Temperature threshold exceeded. <<< ERROR
+5. [INFO] 2025-12-06T21:25:49.361Z - System nominal. Cycle: 970
+6. [INFO] 2025-12-06T21:25:51.299Z - System nominal. Cycle: 911
+7. [INFO] 2025-12-06T21:25:53.518Z - System nominal. Cycle: 818
+8. [INFO] 2025-12-06T21:25:55.638Z - System nominal. Cycle: 137
+9. [INFO] 2025-12-06T21:25:58.121Z - System nominal. Cycle: 679
+10. [INFO] 2025-12-06T21:26:00.019Z - System nominal. Cycle: 406
+11. [INFO] 2025-12-06T21:26:02.110Z - System nominal. Cycle: 199
+12. [INFO] 2025-12-06T21:26:03.867Z - System nominal. Cycle: 690
+13. [INFO] 2025-12-06T21:26:05.639Z - System nominal. Cycle: 858
+14. [INFO] 2025-12-06T21:26:07.434Z - System nominal. Cycle: 504
+15. [INFO] 2025-12-06T21:26:09.207Z - System nominal. Cycle: 615
+16. [INFO] 2025-12-06T21:26:10.964Z - System nominal. Cycle: 623
+17. [INFO] 2025-12-06T21:26:12.748Z - System nominal. Cycle: 123
+18. [INFO] 2025-12-06T21:26:14.519Z - System nominal. Cycle: 272
+19. [INFO] 2025-12-06T21:26:16.294Z - System nominal. Cycle: 311
+20. [INFO] 2025-12-06T21:26:18.059Z - System nominal. Cycle: 918
+21. [INFO] 2025-12-06T21:26:19.830Z - System nominal. Cycle: 732
+
+======================================================================
+TEMPERATURE DATA
+======================================================================
+
+Total samples: 21
+
+Min: 25.7°C
+Max: 25.8°C
+Avg: 25.8°C
+
+Sample readings:
+  1995-12-07 16:25:41: 25.8°C
+  1995-12-07 16:25:43: 25.8°C
+  1995-12-07 16:25:44: 25.8°C
+  1995-12-07 16:25:46: 25.8°C
+  1995-12-07 16:25:48: 25.8°C
+  1995-12-07 16:25:50: 25.8°C
+  1995-12-07 16:25:52: 25.8°C
+  1995-12-07 16:25:54: 25.8°C
+  1995-12-07 16:25:56: 25.8°C
+  1995-12-07 16:25:59: 25.8°C
+  ... (11 more samples)
+
+======================================================================
+LLM DIAGNOSTIC ANALYSIS
+======================================================================
+
+# Comprehensive Diagnostic Analysis
+
+## 1. FDA Error Code Interpretation
+
+### Error Code: E-TEMP-HIGH
+The error code indicates a critical fault due to exceeded temperature thresholds. According to **FDA 21 CFR Part 820**, which covers the Quality System Regulation (QSR), this may affect product design and performance verification requirements under **IEC 62304**.
+
+### Severity Classification
+Given that the error is classified as "severe" (Critical fault), this potentially places the device in Class II or Class III, depending on its intended use. Device malfunction could result in serious patient harm or death, necessitating immediate attention and analysis.
+
+## 2. Root Cause Analysis
+
+### Log Sequence Patterns
+- The error was logged in isolation with no preceding error logs, but it was immediately followed by another temperature threshold exceedance.
+- Subsequent logs indicated a return to nominal operating conditions, suggesting intermittent faults.
+
+### Temperature Data Correlation
+- Recorded temperatures (Max 25.8°C, Min 25.7°C, Avg 25.8°C) indicate that temperatures are within expected ranges. This suggests a potential issue with sensor calibration, environment interference, or a transient sensor fault rather than sustained over-temperature conditions.
+
+### Anomalies in Context Logs
+- No log entries indicate specific environmental changes or anomalies that would explain the error.
+- The pattern of repeated errors suggests potential sensor instability or a software issue in interpreting sensor data.
+
+### Potential Failure Modes
+- Faulty Si7021 sensor leading to erroneous readings.
+- Software misinterpretation of sensor data due to calibration or algorithm issues.
+- Electrical issues causing fluctuations in sensor readings.
+
+## 3. Troubleshooting Steps
+
+### Action Steps
+1. **Inspect Si7021 Sensor**
+   - **Action:** Check connections and condition of the Si7021 sensor.
+   - **Verification:** Ensure secure connection and functionality of the sensor.
+
+2. **Reset Device and Software**
+   - **Action:** Perform a device reset to clear temporary errors.
+   - **Verification:** Confirm system returns to nominal status without new errors.
+
+3. **Check Environmental Conditions**
+   - **Action:** Evaluate the device environment for excessive heat or obstruction.
+   - **Verification:** Ensure operating conditions align with manufacturer specifications.
+
+4. **Review Calibration Settings**
+   - **Action:** Assess and recalibrate the sensor if settings are incorrect.
+   - **Verification:** Conduct a test cycle to confirm accurate temperature readings.
+
+5. **Log and Document Events**
+   - **Action:** Maintain a detailed log of all faults and steps taken.
+   - **Verification:** Ensure all entries comply with regulatory documentation standards.
+
+## 4. Device Status Assessment
+
+### Current Device Status: **Caution - Monitor Closely**
+The device exhibits intermittent faults, indicated by repeated temperature threshold exceedances. While the device generally functions normally post-error, vigilant monitoring is essential due to the potential for recurring issues.
+
+### Justification
+The critical error suggests a significant risk if malfunctioning, necessitating close observation while in use.
+
+### Operational Limitations
+Limit operations involving critical care scenarios until root cause is fully understood and resolved.
+
+## 5. Safety Recommendations
+
+### Immediate Actions
+- **Operator Safety:** Monitor device closely for recurring error patterns and ensure a manual check of observed temperatures.
+- **Patient Safety:** Do not administer critical therapies relying solely on the affected device until resolved.
+
+### Preventive Measures
+- Implement regular sensor checks and recalibrations.
+- Train staff on identifying and responding to error indications promptly. 
+
+### Escalation Protocol
+- Escalate to biomedical engineering or service personnel if errors persist post-troubleshooting or if sensor faults are detected. Immediate service is crucial to ensuring patient safety and device reliability.
+
+======================================================================
+END OF REPORT
+======================================================================

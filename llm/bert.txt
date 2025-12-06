@@ -3,28 +3,28 @@ MEDICAL DEVICE DIAGNOSTIC REPORT
 Model: RAG + Few-Shot with GPT-4o-mini + BioBERT
 ======================================================================
 
-Report Generated: 2025-12-06 15:10:15.030671
+Report Generated: 2025-12-06 16:23:10.260544
 Device ID: ventilator-01
 
 ERROR SUMMARY
 ----------------------------------------------------------------------
 Error Code: E-TEMP-HIGH
 Message: Critical fault: Temperature threshold exceeded.
-Timestamp: 2025-12-06T20:09:29.998Z
+Timestamp: 2025-12-06T21:22:23.544Z
 
 SIMILAR HISTORICAL CASES (RAG)
 ----------------------------------------------------------------------
-1. ERROR 1 (similarity: 97.0%)
+1. ERROR 1 (similarity: 96.8%)
    Device: temperature_sensor, Temp: 26.6°C
    Severity: Critical, FDA Code: Communication Failure (COM-788)
    Root Cause: USB cable disconnection. Contributing factors: Possible environmental interference or component degradation. Confidence level: 80%
 
-2. ERROR 1 (similarity: 96.9%)
+2. ERROR 1 (similarity: 96.8%)
    Device: temperature_sensor, Temp: 25.6°C
    Severity: Medium, FDA Code: Communication Failure (COM-862)
    Root Cause: USB cable disconnection. Contributing factors: Possible environmental interference or component degradation. Confidence level: 78%
 
-3. ERROR 3 (similarity: 96.8%)
+3. ERROR 3 (similarity: 96.6%)
    Device: temperature_sensor, Temp: 49.4°C
    Severity: Critical, FDA Code: Temperature Regulation Failure (TMF-622)
    Root Cause: Ambient temperature too high causing elevated operating temperature. Contributing factors: Possible extended duty cycle or inadequate ventilation. Confidence level: 91%
@@ -35,27 +35,32 @@ LLM DIAGNOSTIC ANALYSIS
 ======================================================================
 
 ## FDA ERROR CLASSIFICATION
-- **FDA Error Code:** Thermal Management Failure (TMF-004)
+- **FDA Error Code:** Thermal Management Failure (TMF-003)
 - **Severity:** Critical
-- **Device Status:** Malfunctioning
+- **Device Status:** High temperature threshold exceeded
 
 ## ROOT CAUSE ANALYSIS
-- **Primary Cause:** Overheating due to inadequate cooling or ventilation.
-- **Contributing Factors:** Extended duty cycle, possible blockage of cooling vents.
-- **Evidence from logs:** The logs show consistent “System nominal” messages leading up to the error, suggesting stable operation before a sudden temperature spike. Following the error, the logs still indicate nominal status, which may imply a lag in sensor reading or intermittent fault.
-- **Evidence from temperature:** The temperature readings indicate a rising trend from 58.8°C to 93.8°C over 37 samples, with an average of 61.3°C which is significantly high for operational parameters.
+- **Primary Cause:** Potential malfunction of the cooling system, leading to elevated temperatures.
+- **Contributing Factors:** 
+  - Environmental conditions 
+  - Possible component degradation
+- **Evidence from logs:** 
+  - Logs indicate the system remained nominal prior to the error: `[INFO] System nominal. Cycle: 619, 324, 765, 296, 608`
+  - The critical error was flagged immediately after a series of nominal cycles, showing no warning signs before the malfunction.
+- **Evidence from temperature:** 
+  - Temperature readings remained stable at 25.9°C, but the error message indicates a threshold exceeded while slightly elevated ambient temperatures may be planned for normal operational ranges.
 - **Confidence:** 85%
 
 ## TROUBLESHOOTING STEPS
-1. **IMMEDIATE:** Power down the device to prevent further escalation.
-2. **DIAGNOSTIC:** Inspect cooling fans and ventilation ports for blockages or degradation.
-3. **CORRECTIVE:** Replace any faulty cooling components identified during inspection.
-4. **PREVENTIVE:** Schedule regular maintenance checks and ensure adequate airflow around the device.
+1. **IMMEDIATE:** Power down the ventilator to prevent further overheating.
+2. **DIAGNOSTIC:** Inspect the cooling system, including the fan and ventilation ports, for any obstructions or failures.
+3. **CORRECTIVE:** Replace any faulty components within the thermal management system.
+4. **PREVENTIVE:** Implement regular checks and maintenance of the cooling system to ensure functionality and reliability.
 
 ## SAFETY ASSESSMENT
-- **Patient Risk:** High
-- **Continue Use:** No
-- **Escalate:** Immediate action required if patient support is dependent on the ventilator. Consider alternative arrangements for patient care.
+- **Patient Risk:** High (due to overheating and potential device failure)
+- **Continue Use:** No (immediate shutdown is required to ensure safety)
+- **Escalate:** Yes, if critical thresholds are repeatedly exceeded or if multiple failures occur after troubleshooting actions.
 
 ======================================================================
 END OF REPORT
