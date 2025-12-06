@@ -28,6 +28,7 @@ TRAINING_DATA_PATH = "medical_device_training.jsonl"
 class TemperatureEntry(BaseModel):
     ts: float
     val: float
+    humidity: Optional[float] = None
 
 class LogEntry(BaseModel):
     timestamp: str
@@ -238,6 +239,15 @@ async def analyze_with_rag_fewshot(packet: ErrorPacket):
         "trend": "rising" if temps and temps[-1] > temps[0] else "falling" if temps and temps[-1] < temps[0] else "stable"
     }
     
+    # Analyze humidity
+    humidities = [t.humidity for t in packet.temperature_data if t.humidity is not None]
+    humidity_analysis = {
+        "min": min(humidities) if humidities else 0,
+        "max": max(humidities) if humidities else 0,
+        "avg": sum(humidities) / len(humidities) if humidities else 0,
+        "trend": "rising" if humidities and humidities[-1] > humidities[0] else "falling" if humidities and humidities[-1] < humidities[0] else "stable"
+    }
+    
     # Find similar cases (RAG)
     similar_cases = find_similar_cases(error_log, packet.temperature_data, top_k=3)
     
@@ -334,6 +344,11 @@ Diagnosis:
 - Average: {temp_analysis['avg']:.1f}°C
 - Trend: {temp_analysis['trend'].upper()}
 - Samples: {len(temps)}
+
+**Humidity Analysis:**
+- Range: {humidity_analysis['min']:.1f}% - {humidity_analysis['max']:.1f}%
+- Average: {humidity_analysis['avg']:.1f}%
+- Trend: {humidity_analysis['trend'].upper()}
 
 **Logs Leading to Error:**
 """

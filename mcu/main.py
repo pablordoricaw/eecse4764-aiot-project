@@ -168,7 +168,7 @@ def send_package_to_llm(log_sequence, temp_history):
             relevant_temps.append(t)
             
     payload = {
-        "context": "Temperature Event from Si7021 Sensor",
+        "context": "Temperature and Humidity Event from Si7021 Sensor",
         "device_id": DEVICE_ID,
         "log_sequence": log_sequence,
         "temperature_data": relevant_temps
@@ -209,13 +209,14 @@ def main():
     print("System Online. Reading REAL temperature from Si7021.")
 
     while True:
-        # A. READ SENSOR (Real Temperature from Si7021)
+        # A. READ SENSOR (Real Temperature and Humidity from Si7021)
         current_temp = read_temperature()
         current_humidity = read_humidity()
-        # Server expects: {"ts": float, "val": float}
+        # Server expects: {"ts": float, "val": float, "humidity": float}
         temp_history.append({
             "ts": time.time(), 
-            "val": current_temp
+            "val": current_temp,
+            "humidity": current_humidity
         })
         if len(temp_history) > 300: temp_history.pop(0)
 
