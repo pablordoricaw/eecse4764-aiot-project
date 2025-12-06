@@ -11,3 +11,7 @@ mcu = [
     "esptool>=5.1.0",
     "mpfshell>=0.9.3",
 ]
+medical-device = [
+    "fastapi>=0.124.0",
+    "uvicorn>=0.38.0",
+]
