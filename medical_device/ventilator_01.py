@@ -15,7 +15,7 @@ from typing import override
 from utils import setup_base_logging
 
 ###############################################################################
-# Logging Utils
+# Logging
 ###############################################################################
 
 logger = None
