@@ -76,7 +76,7 @@ If you don’t like the name `main.py`, you can name your code `new_name.py`, an
 put the following line in `main.py`, then upload both files.
 
 ```python
-import lab1_check1
+import new_name
 ```
 
 This line will upload all `*.py` in your current folder
@@ -137,7 +137,7 @@ The medical device component is made of 3 Python modules:
 
 - ventilator_01.py,
 - logs_pipeline.py, and
-- log_server.py
+- logs_server.py
 
 The ventilator is the simulated medical device that writes logs files. These log files are consumed by the logs pipeline which inserts each log record into a SQLite database. Lastly, the logs server responds to HTTP GET requests on its `/logs` endpoint by to serve the log records from the database.
 
