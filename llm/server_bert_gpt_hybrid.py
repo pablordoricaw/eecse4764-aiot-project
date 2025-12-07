@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 import uvicorn
 import fastapi_poe as fp
@@ -18,34 +18,27 @@ app = FastAPI(title="Medical Device Diagnostic - RAG + Few-Shot")
 # CONFIGURATION
 # ==============================================================================
 POE_API_KEY = "aA_SPfposL5Zgrm3qft9ufaalxrjpkZdvElonE2lG4w"
-LLM_MODEL = "GPT-4o-Mini"
-TRAINING_DATA_PATH = "medical_device_training.jsonl"
+LLM_MODEL = "GPT-4.1-Mini"
+TRAINING_DATA_PATH = "medical_device_training_with_humidity.jsonl"
 
 # ==============================================================================
-# DATA MODELS
+# DATA MODELS - UPDATED FOR NEW SCHEMA
 # ==============================================================================
 
 
-class TemperatureEntry(BaseModel):
-    ts: float
-    val: float
-    humidity: Optional[float] = None
+class SingleLogPacket(BaseModel):
+    """New schema - receives one log at a time"""
+    log: dict  # Contains all log fields including sensor data
+    log_index: int  # 1-5 (1-based indexing)
+    log_count: int  # Always 5
 
 
-class LogEntry(BaseModel):
-    timestamp: str
-    device_id: str
-    level: str
-    event_type: str
-    error_code: Optional[str]
-    message: str
+# ==============================================================================
+# SESSION MANAGEMENT
+# ==============================================================================
 
-
-class ErrorPacket(BaseModel):
-    context: str
-    device_id: str
-    log_sequence: List[LogEntry]
-    temperature_data: List[TemperatureEntry]
+# In-memory storage for accumulating logs from ESP32
+active_sessions: Dict[str, List[dict]] = {}
 
 
 # ==============================================================================
@@ -87,16 +80,15 @@ def extract_error_info(user_message):
     device_match = re.search(r"Device ID: (\w+)-training", user_message)
     device_type = device_match.group(1) if device_match else "unknown_device"
 
-    # Extract temperature range
-    temp_match = re.search(r"Range: ([\d.]+)°C - ([\d.]+)°C", user_message)
-    if temp_match:
-        temp_min = float(temp_match.group(1))
-        temp_max = float(temp_match.group(2))
-        temp_avg = (temp_min + temp_max) / 2
-    else:
-        temp_avg = 25.0
+    # Extract temperature average
+    temp_match = re.search(r"Average: ([\d.]+)°C", user_message)
+    temp_avg = float(temp_match.group(1)) if temp_match else 25.0
 
-    return error_code, device_type, temp_avg
+    # Extract humidity average
+    humidity_match = re.search(r"Average: ([\d.]+)%", user_message)
+    humidity_avg = float(humidity_match.group(1)) if humidity_match else 50.0
+
+    return error_code, device_type, temp_avg, humidity_avg
 
 
 def extract_diagnosis_summary(assistant_message):
@@ -149,14 +141,14 @@ if HAS_TRAINING_DATA:
             (m["content"] for m in messages if m["role"] == "assistant"), ""
         )
 
-        # Extract structured info
-        error_code, device_type, temp_avg = extract_error_info(user_msg)
+        # Extract structured info (now includes humidity)
+        error_code, device_type, temp_avg, humidity_avg = extract_error_info(user_msg)
         fda_code, severity, root_cause, troubleshooting = extract_diagnosis_summary(
             assistant_msg
         )
 
-        # Create embedding text
-        text = f"Error: {error_code}, Device: {device_type}, Temp: {temp_avg:.1f}°C"
+        # Create embedding text - NOW WITH HUMIDITY
+        text = f"Error: {error_code}, Device: {device_type}, Temp: {temp_avg:.1f}°C, Humidity: {humidity_avg:.1f}%"
         training_texts.append(text)
 
         # Store structured info
@@ -165,6 +157,7 @@ if HAS_TRAINING_DATA:
                 "error_code": error_code,
                 "device_type": device_type,
                 "temperature": temp_avg,
+                "humidity": humidity_avg,
                 "fda_code": fda_code,
                 "severity": severity,
                 "root_cause": root_cause,
@@ -182,16 +175,16 @@ if HAS_TRAINING_DATA:
     print(f"Embeddings ready! ({len(TRAINING_INFO)} cases indexed)")
 
 
-def find_similar_cases(error_log, temps, top_k=3):
+def find_similar_cases(error_code, device_id, temps, humidities, top_k=3):
     """Find similar historical cases using BioBERT"""
     if not HAS_TRAINING_DATA:
         return []
 
-    # Create query text
-    avg_temp = sum(t.val for t in temps) / len(temps) if temps else 0
-    query_text = (
-        f"Error: {error_log.error_code}, Device: medical device, Temp: {avg_temp:.1f}°C"
-    )
+    # Create query text with humidity
+    avg_temp = sum(temps) / len(temps) if temps else 25.0
+    avg_humidity = sum(humidities) / len(humidities) if humidities else 50.0
+    
+    query_text = f"Error: {error_code}, Device: {device_id}, Temp: {avg_temp:.1f}°C, Humidity: {avg_humidity:.1f}%"
 
     # Get embedding and find similar
     query_embedding = embed_text(query_text).reshape(1, -1)
@@ -207,6 +200,7 @@ def find_similar_cases(error_log, temps, top_k=3):
                 "error_code": info["error_code"],
                 "device_type": info["device_type"],
                 "temperature": info["temperature"],
+                "humidity": info["humidity"],
                 "severity": info["severity"],
                 "fda_code": info["fda_code"],
                 "root_cause": info["root_cause"],
@@ -250,44 +244,41 @@ def extract_from_llm_response(llm_response):
 # ==============================================================================
 
 
-async def analyze_with_rag_fewshot(packet: ErrorPacket):
+async def analyze_with_rag_fewshot(all_logs: List[dict]):
     """Main analysis function using RAG + Few-Shot"""
 
-    # Find error log
-    error_log = next((log for log in packet.log_sequence if log.error_code), None)
-    if not error_log:
-        return "No error found in log sequence"
-
-    error_index = packet.log_sequence.index(error_log)
+    # Error is always at index 2 (3rd log in 0-based list)
+    error_log = all_logs[2]
+    device_id = error_log["device_id"]
+    
+    # Extract sensor data from all logs
+    temps = [log["sensor_temp_c"] for log in all_logs]
+    humidities = [log["sensor_humidity"] for log in all_logs]
 
     # Analyze temperature
-    temps = [t.val for t in packet.temperature_data]
     temp_analysis = {
-        "min": min(temps) if temps else 0,
-        "max": max(temps) if temps else 0,
-        "avg": sum(temps) / len(temps) if temps else 0,
-        "trend": "rising"
-        if temps and temps[-1] > temps[0]
-        else "falling"
-        if temps and temps[-1] < temps[0]
-        else "stable",
+        "min": min(temps),
+        "max": max(temps),
+        "avg": sum(temps) / len(temps),
+        "trend": "rising" if temps[-1] > temps[0] else "falling" if temps[-1] < temps[0] else "stable",
     }
 
     # Analyze humidity
-    humidities = [t.humidity for t in packet.temperature_data if t.humidity is not None]
     humidity_analysis = {
-        "min": min(humidities) if humidities else 0,
-        "max": max(humidities) if humidities else 0,
-        "avg": sum(humidities) / len(humidities) if humidities else 0,
-        "trend": "rising"
-        if humidities and humidities[-1] > humidities[0]
-        else "falling"
-        if humidities and humidities[-1] < humidities[0]
-        else "stable",
+        "min": min(humidities),
+        "max": max(humidities),
+        "avg": sum(humidities) / len(humidities),
+        "trend": "rising" if humidities[-1] > humidities[0] else "falling" if humidities[-1] < humidities[0] else "stable",
     }
 
     # Find similar cases (RAG)
-    similar_cases = find_similar_cases(error_log, packet.temperature_data, top_k=3)
+    similar_cases = find_similar_cases(
+        error_log.get("maude_error_code") or error_log.get("device_event_code"),
+        device_id,
+        temps,
+        humidities,
+        top_k=3
+    )
 
     # Build prompt with RAG + Few-Shot
     prompt = f"""You are a medical device diagnostic AI assistant specialized in FDA-regulated equipment.
@@ -296,34 +287,36 @@ async def analyze_with_rag_fewshot(packet: ErrorPacket):
 ║                    FEW-SHOT EXAMPLES                               ║
 ╚═══════════════════════════════════════════════════════════════════╝
 
-EXAMPLE 1: Temperature Sensor Failure
+EXAMPLE 1: Temperature & Humidity Sensor Failure
 ─────────────────────────────────────
 Error Code: E-SENSOR-FAIL
 Device: Ventilator
 Temp Readings: [21.2, 21.0, -999, -999] (sensor disconnect)
+Humidity Readings: [55%, 54%, 0%, 0%] (sensor disconnect)
 Logs: [INFO] System OK → [WARN] Sensor fluctuation → [ERROR] Sensor failure
 
 Diagnosis:
 - FDA Error Code: Sensor Malfunction (SMF-001)
 - Severity: High
-- Root Cause: Temperature sensor hardware failure (reading -999 indicates disconnect)
+- Root Cause: Environmental sensor hardware failure (invalid readings indicate disconnect)
 - Troubleshooting:
   1. Check sensor cable connections
-  2. Replace temperature sensor module
+  2. Replace sensor module
   3. Recalibrate after replacement
 
 ─────────────────────────────────────
-EXAMPLE 2: Thermal Management Failure
+EXAMPLE 2: Thermal Management Failure with High Humidity
 ─────────────────────────────────────
 Error Code: E-TEMP-OVER-THRESH
 Device: Medical Monitor
 Temp Readings: [72.1, 73.4, 75.8, 78.2] (rising trend)
+Humidity Readings: [45%, 43%, 40%, 38%] (decreasing - dry air)
 Logs: [INFO] Normal → [WARN] Fan RPM low → [WARN] Temp rising → [ERROR] Threshold exceeded
 
 Diagnosis:
 - FDA Error Code: Thermal Management Failure (TMF-003)
 - Severity: Critical
-- Root Cause: Cooling system degradation
+- Root Cause: Cooling system degradation, dry air reducing heat dissipation efficiency
 - Troubleshooting:
   1. IMMEDIATE: Power down device
   2. Inspect cooling fan for obstructions
@@ -331,20 +324,22 @@ Diagnosis:
   4. Replace cooling fan if RPM <2000
 
 ─────────────────────────────────────
-EXAMPLE 3: Normal Variation
+EXAMPLE 3: Condensation Risk
 ─────────────────────────────────────
-Error Code: E-TEMP-VARIANCE
+Error Code: E-HUMIDITY-HIGH
 Device: Imaging Device
-Temp Readings: [70.8, 71.2, 70.5, 71.0] (stable)
-Logs: [INFO] All systems nominal → [INFO] Regular operation
+Temp Readings: [20.5, 20.3, 20.1, 19.8] (decreasing)
+Humidity Readings: [75%, 78%, 82%, 85%] (rising - condensation risk)
+Logs: [INFO] All systems nominal → [WARN] High humidity detected → [ERROR] Condensation risk
 
 Diagnosis:
-- FDA Error Code: Normal Variation (NV-000)
-- Severity: Low
-- Root Cause: Normal thermal fluctuation within acceptable range
+- FDA Error Code: Environmental Control Warning (ENV-402)
+- Severity: Medium
+- Root Cause: High humidity with cooling temps creates condensation risk
 - Troubleshooting:
-  1. Continue monitoring
-  2. No immediate action required
+  1. Move device to climate-controlled area
+  2. Enable dehumidification if available
+  3. Monitor for water ingress
 
 """
 
@@ -359,8 +354,8 @@ Diagnosis:
         for i, case in enumerate(similar_cases, 1):
             prompt += f"""Case {i} (Similarity: {case["similarity"]:.1%}):
 - Error: {case["error_code"]} | Device: {case["device_type"]}
-- Temperature: {case["temperature"]:.1f}°C | Severity: {case["severity"]}
-- FDA Code: {case["fda_code"]}
+- Temperature: {case["temperature"]:.1f}°C | Humidity: {case["humidity"]:.1f}%
+- Severity: {case["severity"]} | FDA Code: {case["fda_code"]}
 - Root Cause: {case["root_cause"]}
 - Troubleshooting: {case["troubleshooting"]}
 
@@ -372,10 +367,11 @@ Diagnosis:
 ║                    CURRENT CASE TO ANALYZE                         ║
 ╚═══════════════════════════════════════════════════════════════════╝
 
-**Device ID:** {packet.device_id}
-**Error Code:** {error_log.error_code}
-**Error Message:** {error_log.message}
-**Error Time:** {error_log.timestamp}
+**Device ID:** {device_id}
+**Error Code:** {error_log.get("maude_error_code") or error_log.get("device_event_code")}
+**Error Message:** {error_log["device_message"]}
+**Error Time:** {error_log["device_timestamp"]}
+**Subsystem:** {error_log.get("device_subsystem", "Unknown")}
 
 **Temperature Analysis:**
 - Range: {temp_analysis["min"]:.1f}°C - {temp_analysis["max"]:.1f}°C
@@ -387,24 +383,23 @@ Diagnosis:
 - Range: {humidity_analysis["min"]:.1f}% - {humidity_analysis["max"]:.1f}%
 - Average: {humidity_analysis["avg"]:.1f}%
 - Trend: {humidity_analysis["trend"].upper()}
+- Samples: {len(humidities)}
 
-**Logs Leading to Error:**
+**Log Sequence (5 logs total):**
 """
 
-    # Add logs before error
-    start_idx = max(0, error_index - 5)
-    for i in range(start_idx, error_index):
-        log = packet.log_sequence[i]
-        prompt += f"  [{log.level}] {log.message}\n"
-
-    prompt += f"\n**>>> ERROR <<<**\n  [{error_log.level}] {error_log.message}\n\n"
-
-    # Add logs after error
-    prompt += "**Logs After Error:**\n"
-    end_idx = min(len(packet.log_sequence), error_index + 6)
-    for i in range(error_index + 1, end_idx):
-        log = packet.log_sequence[i]
-        prompt += f"  [{log.level}] {log.message}\n"
+    # Add all 5 logs with context
+    for i, log in enumerate(all_logs):
+        log_label = "BEFORE" if i < 2 else "ERROR" if i == 2 else "AFTER"
+        level = log.get("device_level", "INFO")
+        message = log["device_message"]
+        temp = log["sensor_temp_c"]
+        humidity = log["sensor_humidity"]
+        
+        if i == 2:
+            prompt += f"\n**>>> [{log_label}] <<<**\n"
+        
+        prompt += f"  [{level}] {message} (Temp: {temp:.1f}°C, Humidity: {humidity:.1f}%)\n"
 
     prompt += f"""
 
@@ -415,7 +410,12 @@ Diagnosis:
 Analyze this case using:
 1. The few-shot examples above as templates
 2. The similar historical cases (if provided) as context
-3. The actual log sequence and temperature data
+3. The actual log sequence, temperature data, and humidity data
+
+Pay special attention to:
+- Temperature and humidity correlation (high humidity + low temp = condensation risk)
+- Sensor reading validity (invalid values indicate hardware failure)
+- Trend analysis (rising/falling patterns indicate root cause)
 
 Provide diagnosis in this format:
 
@@ -429,6 +429,7 @@ Provide diagnosis in this format:
 - Contributing Factors: [list]
 - Evidence from logs: [cite specific logs]
 - Evidence from temperature: [cite trends]
+- Evidence from humidity: [cite trends and correlation with temp]
 - Confidence: [percentage]
 
 ## TROUBLESHOOTING STEPS
@@ -462,12 +463,12 @@ Base your analysis on the patterns shown in examples and similar cases.
 # ==============================================================================
 
 
-def save_diagnostic_report(packet: ErrorPacket, diagnosis: str, similar_cases: list):
+def save_diagnostic_report(all_logs: List[dict], diagnosis: str, similar_cases: list):
     """Save complete report"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"report_rag_fewshot_{timestamp}.txt"
 
-    error_log = next((log for log in packet.log_sequence if log.error_code), None)
+    error_log = all_logs[2]  # Error is always at index 2
 
     with open(filename, "w") as f:
         f.write("=" * 70 + "\n")
@@ -476,14 +477,14 @@ def save_diagnostic_report(packet: ErrorPacket, diagnosis: str, similar_cases: l
         f.write("=" * 70 + "\n\n")
 
         f.write(f"Report Generated: {datetime.now()}\n")
-        f.write(f"Device ID: {packet.device_id}\n\n")
+        f.write(f"Device ID: {error_log['device_id']}\n\n")
 
-        if error_log:
-            f.write("ERROR SUMMARY\n")
-            f.write("-" * 70 + "\n")
-            f.write(f"Error Code: {error_log.error_code}\n")
-            f.write(f"Message: {error_log.message}\n")
-            f.write(f"Timestamp: {error_log.timestamp}\n\n")
+        f.write("ERROR SUMMARY\n")
+        f.write("-" * 70 + "\n")
+        f.write(f"Error Code: {error_log.get('maude_error_code') or error_log.get('device_event_code')}\n")
+        f.write(f"Message: {error_log['device_message']}\n")
+        f.write(f"Timestamp: {error_log['device_timestamp']}\n")
+        f.write(f"Subsystem: {error_log.get('device_subsystem', 'Unknown')}\n\n")
 
         if similar_cases:
             f.write("SIMILAR HISTORICAL CASES (RAG)\n")
@@ -493,7 +494,7 @@ def save_diagnostic_report(packet: ErrorPacket, diagnosis: str, similar_cases: l
                     f"{i}. {case['error_code']} (similarity: {case['similarity']:.1%})\n"
                 )
                 f.write(
-                    f"   Device: {case['device_type']}, Temp: {case['temperature']:.1f}°C\n"
+                    f"   Device: {case['device_type']}, Temp: {case['temperature']:.1f}°C, Humidity: {case['humidity']:.1f}%\n"
                 )
                 f.write(
                     f"   Severity: {case['severity']}, FDA Code: {case['fda_code']}\n"
@@ -517,51 +518,82 @@ def save_diagnostic_report(packet: ErrorPacket, diagnosis: str, similar_cases: l
 
 
 @app.post("/api/ingest")
-async def ingest_error_packet(packet: ErrorPacket):
-    """Receive error packet and analyze with RAG + Few-Shot"""
-
-    print("\n" + "=" * 70)
-    print("RECEIVED ERROR PACKET")
-    print("=" * 70)
-    print(f"Device: {packet.device_id}")
-    print(f"Logs: {len(packet.log_sequence)}")
-    print(f"Temps: {len(packet.temperature_data)}")
-
-    error_log = next((log for log in packet.log_sequence if log.error_code), None)
-    if error_log:
-        print(f"Error: {error_log.error_code} - {error_log.message}")
-
-    # Find similar cases
-    similar_cases = []
-    if error_log:
-        similar_cases = find_similar_cases(error_log, packet.temperature_data)
+async def ingest_log(packet: SingleLogPacket):
+    """Receive individual logs from ESP32 (1-5 logs per error event)"""
+    
+    device_id = packet.log["device_id"]
+    
+    # Initialize session if new
+    if device_id not in active_sessions:
+        active_sessions[device_id] = []
+        print(f"\n[SESSION] Started new session for device: {device_id}")
+    
+    # Append this log
+    active_sessions[device_id].append(packet.log)
+    
+    print(f"[LOG {packet.log_index}/{packet.log_count}] Received from {device_id}")
+    print(f"  Level: {packet.log['device_level']}")
+    print(f"  Message: {packet.log['device_message']}")
+    print(f"  Temp: {packet.log['sensor_temp_c']:.1f}°C, Humidity: {packet.log['sensor_humidity']:.1f}%")
+    
+    # Check if we have all 5 logs
+    if len(active_sessions[device_id]) == 5:
+        print("\n" + "=" * 70)
+        print("ALL LOGS RECEIVED - STARTING ANALYSIS")
+        print("=" * 70)
+        
+        all_logs = active_sessions[device_id]
+        error_log = all_logs[2]  # Error is at index 2
+        
+        # Extract data for RAG
+        temps = [log["sensor_temp_c"] for log in all_logs]
+        humidities = [log["sensor_humidity"] for log in all_logs]
+        
+        # Find similar cases
+        similar_cases = find_similar_cases(
+            error_log.get("maude_error_code") or error_log.get("device_event_code"),
+            device_id,
+            temps,
+            humidities,
+            top_k=3
+        )
+        
         if similar_cases:
             print(f"\nFound {len(similar_cases)} similar cases:")
             for case in similar_cases:
-                print(
-                    f"  • {case['error_code']} (similarity: {case['similarity']:.1%})"
-                )
-
-    # Analyze
-    diagnosis = await analyze_with_rag_fewshot(packet)
-
-    print("\n" + "=" * 70)
-    print("DIAGNOSIS COMPLETE")
-    print("=" * 70)
-
-    # Save report
-    filename = save_diagnostic_report(packet, diagnosis, similar_cases)
-    print(f"✓ Report saved: {filename}\n")
-
-    return {
-        "status": "success",
-        "diagnosis": diagnosis,
-        "report_file": filename,
-        "model": "RAG + Few-Shot (BioBERT + GPT-4o-mini)",
-        "similar_cases_used": len(similar_cases),
-        "similar_cases": similar_cases,
-        "approach": "hybrid_rag_fewshot",
-    }
+                print(f"  • {case['error_code']} (similarity: {case['similarity']:.1%})")
+        
+        # Analyze with RAG + Few-Shot
+        diagnosis = await analyze_with_rag_fewshot(all_logs)
+        
+        print("\n" + "=" * 70)
+        print("DIAGNOSIS COMPLETE")
+        print("=" * 70)
+        
+        # Save report
+        filename = save_diagnostic_report(all_logs, diagnosis, similar_cases)
+        print(f"✓ Report saved: {filename}\n")
+        
+        # Clean up session
+        del active_sessions[device_id]
+        
+        return {
+            "status": "complete",
+            "diagnosis": diagnosis,
+            "report_file": filename,
+            "model": "RAG + Few-Shot (BioBERT + GPT-4o-mini)",
+            "similar_cases_used": len(similar_cases),
+            "similar_cases": similar_cases,
+            "approach": "hybrid_rag_fewshot",
+        }
+    else:
+        # Still buffering logs
+        return {
+            "status": "buffering",
+            "received": len(active_sessions[device_id]),
+            "waiting_for": 5,
+            "device_id": device_id
+        }
 
 
 @app.get("/")
@@ -570,13 +602,30 @@ def root():
         "service": "Medical Device Diagnostic - RAG + Few-Shot",
         "model": "BioBERT (RAG) + GPT-4o-mini (Few-Shot)",
         "training_samples": len(training_data) if HAS_TRAINING_DATA else 0,
+        "active_sessions": len(active_sessions),
         "status": "operational",
     }
 
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "approach": "RAG + Few-Shot"}
+    return {
+        "status": "healthy",
+        "approach": "RAG + Few-Shot",
+        "active_sessions": len(active_sessions)
+    }
+
+
+@app.get("/sessions")
+def list_sessions():
+    """Debug endpoint to see active sessions"""
+    return {
+        "active_sessions": list(active_sessions.keys()),
+        "session_details": {
+            device_id: {"logs_received": len(logs)}
+            for device_id, logs in active_sessions.items()
+        }
+    }
 
 
 # ==============================================================================
@@ -586,17 +635,22 @@ def health_check():
 if __name__ == "__main__":
     print("\n" + "=" * 70)
     print("Medical Device Diagnostic Server - RAG + Few-Shot")
+    print("Updated Schema: Sequential Log Ingestion (1-5 logs)")
     print("=" * 70)
     print(f"\nLLM Model: {LLM_MODEL}")
     print(f"BioBERT Model: {MODEL_NAME}")
     print(f"Training Data: {TRAINING_DATA_PATH}")
     print(f"Training Samples: {len(training_data) if HAS_TRAINING_DATA else 0}")
     print("\nEndpoints:")
-    print("  POST /api/ingest - Receive error packets from ESP32")
-    print("  GET  /           - Server info")
-    print("  GET  /health     - Health check")
+    print("  POST /api/ingest   - Receive individual logs from ESP32 (1-5 per error)")
+    print("  GET  /             - Server info")
+    print("  GET  /health       - Health check")
+    print("  GET  /sessions     - Active sessions debug info")
+    print("\nNew Features:")
+    print("  • Sequential log buffering (5 logs: 2 before, error, 2 after)")
+    print("  • Humidity sensor integration")
+    print("  • Updated BioBERT embeddings with humidity data")
     print("\nStarting server on http://0.0.0.0:5001")
     print("=" * 70 + "\n")
 
     uvicorn.run(app, host="0.0.0.0", port=5001)
-
