@@ -131,3 +131,80 @@ And remove specific lab dependencies after you're done working on it:
 uv sync --no-group <component> # Replace <component> with mcu, llm, medical_device
 ```
 
+### Medical Device Component
+
+The medical device component is made of 3 Python modules:
+
+- ventilator_01.py,
+- logs_pipeline.py, and
+- log_server.py
+
+The ventilator is the simulated medical device that writes logs files. These log files are consumed by the logs pipeline which inserts each log record into a SQLite database. Lastly, the logs server responds to HTTP GET requests on its `/logs` endpoint by to serve the log records from the database.
+
+```text
+
++--------------------+        +----------------------+        +--------------------+
+|  ventilator_01.py  |        |   logs_pipeline.py   |        |   logs_server.py   |
+|--------------------|        |----------------------|        |--------------------|
+| - Simulated        |  JSONL | - Watches logs dir   |  SQL   | - FastAPI server   |
+|   ventilator       +------->+ - Parses JSONL       +------->+ - Serves /logs     |
+| - Logs to stdout   |  files | - Computes log_id    |  DB    |   from SQLite      |
+|   / stderr         |        | - Inserts into DB    |        | - Used by MCU      |
++---------+----------+        +----------+-----------+        +---------+----------+
+          |                              |                               |
+          |                              |                               |
+          v                              v                               v
+   +--------------+             +----------------+               +-----------------+
+   | logs/        |             | logs.db (SQLite)|              |   HTTP client   |
+   |  ventilator. |             |   logs table    |              |  (HTTP GET /logs|
+   |  latest.log. |             |  (dedup by      |              |   ?device_id...)|
+   |  jsonl       |             |   log_id)       |              +-----------------+
+   |  ventilator. |             +-----------------+
+   |  <ts>.log.   |
+   |  jsonl       |
+   +--------------+
+```
+
+#### How to Run
+
+First, make sure that you have the dependencies installed:
+
+```bash
+uv sync --group medical_device
+```
+
+And activating the virtual environment:
+
+```bash
+source .venv/bin/activate
+```
+
+Then, go into the `medical_device` directory with:
+
+```bash
+cd medical_device
+```
+
+Then each Python module needs to be run separately, so in 3 different terminal sessions run each one (the order listed below is recommended):
+
+> [!TIP]
+> Each Python module has command line arguments to configure certain aspects of their run time behavior. You can get the full usage message by adding a ` -h` to the commands below.
+>
+> Running the Python modules without command line arguments uses the default values.
+
+1. Run the ventilator
+
+    ```bash
+    uv run ventilator_01.py
+    ```
+2. Run the logs pipeline
+
+    ```bash
+    uv run logs_pipeline.py
+    ```
+
+3. Run the logs server
+
+    ```bash
+    uv run logs_server.py
+    ```
