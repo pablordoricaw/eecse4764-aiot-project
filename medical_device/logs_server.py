@@ -49,7 +49,9 @@ EVENT_CODE_TO_MAUDE_SEARCH = {
 
 
 @lru_cache(maxsize=128)
-def query_maude_api(search_term: str, device_type: str = "ventilator") -> Optional[Dict[str, Any]]:
+def query_maude_api(
+    search_term: str, device_type: str = "ventilator"
+) -> Optional[Dict[str, Any]]:
     """
     Query the OpenFDA MAUDE API for adverse events matching the search term.
 
@@ -64,7 +66,9 @@ def query_maude_api(search_term: str, device_type: str = "ventilator") -> Option
     """
     try:
         # Build search query: device type + problem
-        search_query = f"device.generic_name:{device_type}+AND+product_problems:{search_term}"
+        search_query = (
+            f"device.generic_name:{device_type}+AND+product_problems:{search_term}"
+        )
         url = f"{OPENFDA_BASE_URL}?search={search_query}&limit=5"
 
         with httpx.Client(timeout=OPENFDA_TIMEOUT) as client:
@@ -85,7 +89,9 @@ def query_maude_api(search_term: str, device_type: str = "ventilator") -> Option
         return None
 
 
-def extract_maude_fields(maude_response: Optional[Dict[str, Any]], event_code: str) -> Dict[str, Any]:
+def extract_maude_fields(
+    maude_response: Optional[Dict[str, Any]], event_code: str
+) -> Dict[str, Any]:
     """
     Extract relevant fields from MAUDE API response and format with maude_ prefix.
 
@@ -126,7 +132,9 @@ def extract_maude_fields(maude_response: Optional[Dict[str, Any]], event_code: s
 
     # Get count of similar events from metadata
     meta = maude_response.get("meta", {})
-    maude_fields["maude_similar_events_count"] = meta.get("results", {}).get("total", len(results))
+    maude_fields["maude_similar_events_count"] = meta.get("results", {}).get(
+        "total", len(results)
+    )
 
     # Extract data from the most recent/first result
     first_result = results[0]
@@ -158,7 +166,11 @@ def extract_maude_fields(maude_response: Optional[Dict[str, Any]], event_code: s
         for text_entry in mdr_text:
             text_type = text_entry.get("text_type_code", "")
             text_content = text_entry.get("text", "")
-            if text_type in ["Description of Event or Problem", "Manufacturer Narrative"] and text_content:
+            if (
+                text_type
+                in ["Description of Event or Problem", "Manufacturer Narrative"]
+                and text_content
+            ):
                 # Truncate long narratives
                 maude_fields["maude_manufacturer_narrative"] = text_content[:500]
                 break
@@ -212,6 +224,7 @@ def enrich_with_maude(record: Dict[str, Any]) -> Dict[str, Any]:
     # Extract and return maude_* fields
     return extract_maude_fields(maude_response, event_code)
 
+
 app = FastAPI()
 logger = get_logger("logs_server")
 
@@ -260,9 +273,19 @@ def get_logs(
         }
 
         # Add extra device fields if present (sensor readings, etc.)
-        for key in ["temp_c", "temp_limit_high_c", "duration_s", "sensor",
-                    "airway_pressure_peak", "plateau_pressure", "circuit_flow_l_min",
-                    "target_rr", "measured_rr", "target_vt_ml", "measured_vt_ml"]:
+        for key in [
+            "temp_c",
+            "temp_limit_high_c",
+            "duration_s",
+            "sensor",
+            "airway_pressure_peak",
+            "plateau_pressure",
+            "circuit_flow_l_min",
+            "target_rr",
+            "measured_rr",
+            "target_vt_ml",
+            "measured_vt_ml",
+        ]:
             if key in r:
                 log_entry[f"device_{key}"] = r.get(key)
 
