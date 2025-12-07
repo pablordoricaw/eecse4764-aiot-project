@@ -178,13 +178,19 @@ def setup_argparser() -> argparse.ArgumentParser:
         help="Number of breaths to simulate (default: run indefinitely)",
     )
     parser.add_argument(
-        "--fault-interval",
-        type=int,
-        default=20,
-        help="Every N breaths, evaluate whether to inject a sensor fault (default: 20).",
+        "--breath-period",
+        default=3.75,
+        type=float,
+        help="How long in seconds is each breath (default: 3.75 sec). Caution: very small values (e.g., <0.01s) can generate logs faster than they can be written, causing high CPU usage and rapid log rotation.",
     )
     parser.add_argument(
-        "--fault-probability",
+        "--sensor-fault-interval",
+        type=int,
+        default=0,
+        help="Every N breaths, evaluate whether to inject a sensor fault. If 0, choose a random interval for each fault window (default: 0).",
+    )
+    parser.add_argument(
+        "--sensor-fault-probability",
         type=float,
         default=0.3,
         help="Probability [0,1] of injecting a sensor fault at each fault interval (default: 0.3).",
@@ -271,7 +277,7 @@ def log_normal_breath(breath_idx: int, overheat_probability: float) -> None:
     measured_fio2 = target_fio2 + random.uniform(-0.01, 0.01)
 
     logger.info(
-        "Control loop stable for breath %d" % breath_idx,
+        f"Control loop stable for breath {breath_idx}",
         extra={
             "event_type": "MEASUREMENT",
             "event_code": EventCode.CTRL_LOOP_STABLE.name,
@@ -293,7 +299,7 @@ def log_normal_breath(breath_idx: int, overheat_probability: float) -> None:
     circuit_flow_l_min = 40.0 + random.uniform(-3.0, 3.0)
 
     logger.info(
-        "Sensors within expected range for breath %d" % breath_idx,
+        f"Sensors within expected range for breath {breath_idx}",
         extra={
             "event_type": "MEASUREMENT",
             "event_code": EventCode.SENSOR_READ_OK.name,
@@ -327,7 +333,7 @@ def log_normal_breath(breath_idx: int, overheat_probability: float) -> None:
 
 def log_sensor_failure(breath_idx: int, sensor_name: str) -> None:
     logger.warning(
-        "Sensor failure on %s at breath %d" % (sensor_name, breath_idx),
+        f"Sensor failure on {sensor_name} at breath {breath_idx}",
         extra={
             "event_type": "ALARM",
             "event_code": EventCode.SENSOR_READ_FAIL.name,
@@ -346,7 +352,7 @@ def maybe_log_temperature_alarm(
         if temp_high_since is None:
             temp_high_since = now_s
             logger.warning(
-                "Internal ventilator temperature high on breath %d" % breath_idx,
+                f"Internal ventilator temperature high on breath {breath_idx} ({measured_temp_c:.1f} °C)",
                 extra={
                     "event_type": "ALARM",
                     "event_code": EventCode.TEMP_HIGH_WARN.name,
@@ -360,8 +366,7 @@ def maybe_log_temperature_alarm(
         else:
             duration = now_s - temp_high_since
             logger.warning(
-                "Internal ventilator temperature remains high on breath %d"
-                % breath_idx,
+                f"Internal ventilator temperature remains high on breath {breath_idx} ({measured_temp_c:.1f} °C, duration={duration:.1f} s)",
                 extra={
                     "event_type": "ALARM",
                     "event_code": EventCode.TEMP_HIGH_WARN.name,
@@ -374,8 +379,7 @@ def maybe_log_temperature_alarm(
             )
             if duration >= TEMP_ERROR_DURATION_S:
                 logger.error(
-                    "Internal ventilator temperature above limit for %.1f s on breath %d"
-                    % (duration, breath_idx),
+                    f"Internal ventilator temperature above limit for {duration:.1f} s on breath {breath_idx} ({measured_temp_c:.1f} °C)",
                     extra={
                         "event_type": "ERROR_EVENT",
                         "event_code": EventCode.TEMP_HIGH_ERROR.name,
@@ -390,8 +394,7 @@ def maybe_log_temperature_alarm(
     else:
         if temp_high_since is not None:
             logger.info(
-                "Internal ventilator temperature returned to safe range on breath %d"
-                % breath_idx,
+                f"Internal ventilator temperature returned to safe range on breath {breath_idx} ({measured_temp_c:.1f} °C)",
                 extra={
                     "event_type": "STATE_CHANGE",
                     "event_code": EventCode.SENSOR_READ_OK.name,
@@ -404,6 +407,10 @@ def maybe_log_temperature_alarm(
         temp_high_since = None
 
 
+def choose_random_fault_interval():
+    return random.randint(2, 100)
+
+
 def simulate_normal_operation(
     num_breaths: int | None,
     breath_period_s: float,
@@ -414,6 +421,19 @@ def simulate_normal_operation(
     log_startup()
     start = time.time()
     i = 1
+
+    # If fault_interval == 0, use random intervals between faults.
+    # Choose a minimum and maximum interval length for realism.
+    MIN_FAULT_INTERVAL = 3
+    MAX_FAULT_INTERVAL = 20
+
+    if fault_interval > 0:
+        next_fault_breath = fault_interval
+        random_intervals = False
+    else:
+        random_intervals = True
+        next_fault_breath = random.randint(MIN_FAULT_INTERVAL, MAX_FAULT_INTERVAL)
+
     while True:
         if num_breaths is not None and i > num_breaths:
             break
@@ -422,7 +442,7 @@ def simulate_normal_operation(
         log_normal_breath(i, overheat_probability=overheat_probability)
 
         # Fault injection check (generic sensor failures)
-        if i % fault_interval == 0:
+        if i == next_fault_breath:
             if random.random() < fault_probability:
                 fault_type = random.choice(
                     [
@@ -443,6 +463,13 @@ def simulate_normal_operation(
                 sensor_name = sensor_map[fault_type]
                 log_sensor_failure(i, sensor_name)
 
+            # Compute next fault breath
+            if random_intervals:
+                interval = random.randint(MIN_FAULT_INTERVAL, MAX_FAULT_INTERVAL)
+                next_fault_breath = i + interval
+            else:
+                next_fault_breath = i + fault_interval
+
         elapsed = time.time() - start
         target_next = i * breath_period_s
         sleep_for = max(0.0, target_next - elapsed)
@@ -461,9 +488,9 @@ def main() -> None:
     try:
         simulate_normal_operation(
             num_breaths=args.num_breaths,
-            breath_period_s=2.75,
-            fault_interval=args.fault_interval,
-            fault_probability=args.fault_probability,
+            breath_period_s=args.breath_period,
+            fault_interval=args.sensor_fault_interval,
+            fault_probability=args.sensor_fault_probability,
             overheat_probability=args.overheat_probability,
         )
     except KeyboardInterrupt:
