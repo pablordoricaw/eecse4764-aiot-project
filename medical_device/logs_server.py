@@ -78,8 +78,8 @@ def get_logs(
     for r in rows:
         # r is the original payload dict stored by logs_db
         log_entry: Dict[str, Any] = {
-            "timestamp": r.get("timestamp"),
-            "level": r.get("level"),
+            "device_timestamp": r.get("timestamp"),
+            "device_level": r.get("level"),
             "device_id": r.get("device_id"),
             "device_event_type": r.get("event_type"),
             "device_error_code": r.get("error_code"),
