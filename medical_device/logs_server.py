@@ -20,7 +20,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 
 from logs_db import DEFAULT_DB_PATH, query_logs_since
-from logs_utils import setup_base_logging, get_logger
+from utils import setup_base_logging, get_logger
 
 app = FastAPI()
 logger = get_logger("logs_server")
@@ -91,7 +91,7 @@ def get_logs(
         logs.append(log_entry)
 
     if logs:
-        next_since = logs[-1]["timestamp"]
+        next_since = logs[-1]["device_timestamp"]
     else:
         next_since = None
 
