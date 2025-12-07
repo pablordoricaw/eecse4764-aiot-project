@@ -36,8 +36,9 @@ LLM_SERVER_URL = config.LLM_SERVER_URL
 
 MAX_SENSOR_READINGS_BUFFER_SIZE = 300
 
-PRE_ERROR_LOGS = 20
-POST_ERROR_LOGS = 20
+LOGS_REQUEST_LIMIT = 20
+PRE_ERROR_LOGS = 5
+POST_ERROR_LOGS = 5
 
 POLL_DELAY = 1.5  # Seconds between checks
 
@@ -53,7 +54,7 @@ i2c_power.value(1)
 time.sleep(0.1)  # Give sensor time to power up
 
 # I2C Bus - shared by OLED (0x3C) and Si7021 (0x40)
-# Using pins: SDA=22, SCL=20 (same as your original code)
+# Using pins: SDA=22, SCL=20
 i2c = I2C(sda=Pin(22), scl=Pin(20))
 
 # OLED Display
@@ -214,16 +215,21 @@ def connect_wifi():
 
 
 def fetch_logs(current_since):
-    url = f"{LOGS_SERVER_URL}?device_id={DEVICE_ID}&limit=1&since={current_since}"
+    url = f"{LOGS_SERVER_URL}?device_id={DEVICE_ID}&limit={LOGS_REQUEST_LIMIT}&since={current_since}"
     try:
-        res = urequests.get(url)
-        if res.status_code == 200:
-            data = res.json()
+        # Explicit, slightly higher timeout (seconds)
+        res = urequests.get(url, timeout=10)
+        try:
+            if res.status_code == 200:
+                data = res.json()
+                return data.get("logs", []), data.get("next_since", current_since)
+            else:
+                # Print status and body for debugging
+                print(f"[GET] Logs Server HTTP {res.status_code}: {res.text}")
+        finally:
             res.close()
-            return data.get("logs", []), data.get("next_since", current_since)
-        res.close()
     except Exception as e:
-        print(f"[GET] DB Error: {e}")
+        print(f"[GET] Logs Server Error: {e}")
     return [], current_since
 
 
@@ -313,7 +319,7 @@ def main():
         # A. READ SENSOR (Real Temperature and Humidity from Si7021)
         current_temp = read_temperature()
         current_humidity = read_humidity()
-        # Server expects: {"ts": float, "val": float, "humidity": float}
+        # Store sensor readings with timestamp
         sensor_readings_history.append(
             {"ts": time.time(), "val": current_temp, "humidity": current_humidity}
         )
@@ -328,8 +334,9 @@ def main():
         # C. PROCESS LOGS
         for log in new_logs:
             log_buffer.append(log)
-            # server now uses device_message
-            print(f"[LOG] {log.get('device_message', '')}")
+            ts = log.get("device_timestamp", "")
+            msg = log.get("device_message", "")
+            print(f"[LOG] {ts} - {msg}")
 
             if state == "MONITORING":
                 # Keep buffer small
