@@ -11,9 +11,16 @@ Response:
       "logs": [ { ... }, ... ],
       "next_since": "<timestamp-of-last-record>" | null
     }
+
+MAUDE Integration:
+    For ERROR_EVENT logs, queries the FDA OpenFDA MAUDE database to enrich
+    log entries with real adverse event data. All MAUDE fields are prefixed
+    with "maude_" to distinguish from device fields (prefixed "device_").
 """
 
 import argparse
+import httpx
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 import uvicorn
@@ -22,32 +29,191 @@ from fastapi import FastAPI, HTTPException, Query
 from logs_db import DEFAULT_DB_PATH, query_logs_since
 from utils import setup_base_logging, get_logger
 
-app = FastAPI()
-logger = get_logger("logs_server")
+
+# OpenFDA MAUDE API configuration
+OPENFDA_BASE_URL = "https://api.fda.gov/device/event.json"
+OPENFDA_TIMEOUT = 10.0  # seconds
 
 
-def normalize_error_code(record: Dict[str, Any]) -> Optional[str]:
+# Mapping from ventilator event codes to MAUDE search terms
+EVENT_CODE_TO_MAUDE_SEARCH = {
+    "TEMP_HIGH_ERROR": "overheating",
+    "TEMP_HIGH_WARN": "overheating",
+    "SENSOR_READ_FAIL": "sensor+failure",
+    "TEMP_FAIL": "temperature+sensor",
+    "PRESSURE_FAIL": "pressure+sensor",
+    "FLOW_FAIL": "flow+sensor",
+    "VOLUME_FAIL": "volume+measurement",
+    "O2_FAIL": "oxygen+sensor",
+}
+
+
+@lru_cache(maxsize=128)
+def query_maude_api(search_term: str, device_type: str = "ventilator") -> Optional[Dict[str, Any]]:
     """
-    Derive a simple error_code for true error events.
+    Query the OpenFDA MAUDE API for adverse events matching the search term.
 
-    This is a project-level convention: we loosely treat ERROR_EVENT /
-    malfunction-like events as 'device problem' codes similar in spirit
-    to MAUDE device problem codes, but not actual MDR codes. [web:251][web:258]
+    Results are cached to avoid repeated API calls for the same error type.
+
+    Args:
+        search_term: The problem/error to search for (e.g., "overheating")
+        device_type: The type of medical device (default: "ventilator")
+
+    Returns:
+        Dict with MAUDE data or None if query fails
+    """
+    try:
+        # Build search query: device type + problem
+        search_query = f"device.generic_name:{device_type}+AND+product_problems:{search_term}"
+        url = f"{OPENFDA_BASE_URL}?search={search_query}&limit=5"
+
+        with httpx.Client(timeout=OPENFDA_TIMEOUT) as client:
+            response = client.get(url)
+
+            if response.status_code == 200:
+                data = response.json()
+                return data
+            elif response.status_code == 404:
+                # No results found - not an error, just no matching events
+                return None
+            else:
+                return None
+
+    except httpx.TimeoutException:
+        return None
+    except Exception:
+        return None
+
+
+def extract_maude_fields(maude_response: Optional[Dict[str, Any]], event_code: str) -> Dict[str, Any]:
+    """
+    Extract relevant fields from MAUDE API response and format with maude_ prefix.
+
+    Args:
+        maude_response: Raw response from OpenFDA API
+        event_code: The original event code for fallback error code generation
+
+    Returns:
+        Dict with maude_* prefixed fields
+    """
+    # Default/fallback values
+    maude_fields = {
+        "maude_error_code": None,
+        "maude_product_problems": None,
+        "maude_event_type": None,
+        "maude_similar_events_count": 0,
+        "maude_manufacturer_narrative": None,
+        "maude_remedial_action": None,
+        "maude_device_class": None,
+        "maude_report_date": None,
+    }
+
+    # Generate basic error code from event_code
+    if event_code:
+        if "TEMP_HIGH" in event_code:
+            maude_fields["maude_error_code"] = "E-TEMP-HIGH"
+        elif "SENSOR" in event_code or "FAIL" in event_code:
+            maude_fields["maude_error_code"] = f"E-{event_code.replace('_', '-')}"
+        else:
+            maude_fields["maude_error_code"] = f"E-{event_code}"
+
+    if not maude_response or "results" not in maude_response:
+        return maude_fields
+
+    results = maude_response.get("results", [])
+    if not results:
+        return maude_fields
+
+    # Get count of similar events from metadata
+    meta = maude_response.get("meta", {})
+    maude_fields["maude_similar_events_count"] = meta.get("results", {}).get("total", len(results))
+
+    # Extract data from the most recent/first result
+    first_result = results[0]
+
+    # Product problems (array of strings)
+    product_problems = first_result.get("product_problems", [])
+    if product_problems:
+        maude_fields["maude_product_problems"] = product_problems
+
+    # Event type (e.g., "Malfunction", "Injury", "Death")
+    event_type = first_result.get("event_type")
+    if event_type:
+        maude_fields["maude_event_type"] = event_type
+
+    # Remedial action taken
+    remedial_action = first_result.get("remedial_action", [])
+    if remedial_action:
+        maude_fields["maude_remedial_action"] = remedial_action
+
+    # Report date
+    report_date = first_result.get("date_received") or first_result.get("date_of_event")
+    if report_date:
+        maude_fields["maude_report_date"] = report_date
+
+    # MDR text narratives (manufacturer description of event)
+    mdr_text = first_result.get("mdr_text", [])
+    if mdr_text:
+        # Find manufacturer narrative if available
+        for text_entry in mdr_text:
+            text_type = text_entry.get("text_type_code", "")
+            text_content = text_entry.get("text", "")
+            if text_type in ["Description of Event or Problem", "Manufacturer Narrative"] and text_content:
+                # Truncate long narratives
+                maude_fields["maude_manufacturer_narrative"] = text_content[:500]
+                break
+
+    # Device class from openfda extension
+    devices = first_result.get("device", [])
+    if devices:
+        first_device = devices[0]
+        openfda = first_device.get("openfda", {})
+        device_class = openfda.get("device_class")
+        if device_class:
+            maude_fields["maude_device_class"] = device_class
+
+    return maude_fields
+
+
+def enrich_with_maude(record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Enrich an error log record with MAUDE database information.
+
+    Only queries MAUDE for ERROR_EVENT type logs. Other logs get null maude_* fields.
+
+    Args:
+        record: Original log record from database
+
+    Returns:
+        Dict with maude_* fields to merge into log entry
     """
     event_type = record.get("event_type", "")
     event_code = str(record.get("event_code", "") or "")
+
+    # Only enrich ERROR_EVENT logs
     if event_type != "ERROR_EVENT":
-        return None
+        return {
+            "maude_error_code": None,
+            "maude_product_problems": None,
+            "maude_event_type": None,
+            "maude_similar_events_count": None,
+            "maude_manufacturer_narrative": None,
+            "maude_remedial_action": None,
+            "maude_device_class": None,
+            "maude_report_date": None,
+        }
 
-    # Simple mapping; extend as needed
-    # Example: TEMP_HIGH_ERROR -> E-TEMP-HIGH
-    if "TEMP_HIGH_ERROR" in event_code:
-        return "E-TEMP-HIGH"
-    if "SENSOR_OFFLINE" in event_code:
-        return "E-SENSOR-OFFLINE"
+    # Find appropriate MAUDE search term
+    search_term = EVENT_CODE_TO_MAUDE_SEARCH.get(event_code, "malfunction")
 
-    # Default: prefix event_code with E-
-    return f"E-{event_code}" if event_code else None
+    # Query MAUDE API (cached)
+    maude_response = query_maude_api(search_term, device_type="ventilator")
+
+    # Extract and return maude_* fields
+    return extract_maude_fields(maude_response, event_code)
+
+app = FastAPI()
+logger = get_logger("logs_server")
 
 
 @app.get("/logs")
@@ -63,6 +229,12 @@ def get_logs(
 ):
     """
     Fetch logs for a device since a given timestamp.
+
+    Response schema for each log entry:
+    - device_* fields: Data from the medical device logs
+    - maude_* fields: Enriched data from FDA MAUDE database (for ERROR_EVENT only)
+
+    The MCU will add sensor_* fields before forwarding to the LLM server.
     """
     logger.info(f"/logs request device_id={device_id}, since={since}, limit={limit}")
 
@@ -76,22 +248,33 @@ def get_logs(
 
     logs: List[Dict[str, Any]] = []
     for r in rows:
-        # r is the original payload dict stored by logs_db
+        # Build device_* fields from the log record
         log_entry: Dict[str, Any] = {
             "device_timestamp": r.get("timestamp"),
             "device_level": r.get("level"),
             "device_id": r.get("device_id"),
             "device_event_type": r.get("event_type"),
-            "device_error_code": r.get("error_code"),
-            # event_code in DB maps to event_code in the payload
             "device_event_code": r.get("event_code"),
             "device_message": r.get("message"),
+            "device_subsystem": r.get("subsystem"),
         }
-        log_entry["maude_error_code"] = normalize_error_code(r)
+
+        # Add extra device fields if present (sensor readings, etc.)
+        for key in ["temp_c", "temp_limit_high_c", "duration_s", "sensor",
+                    "airway_pressure_peak", "plateau_pressure", "circuit_flow_l_min",
+                    "target_rr", "measured_rr", "target_vt_ml", "measured_vt_ml"]:
+            if key in r:
+                log_entry[f"device_{key}"] = r.get(key)
+
+        # Enrich with MAUDE data (queries FDA API for ERROR_EVENT logs)
+        maude_fields = enrich_with_maude(r)
+        log_entry.update(maude_fields)
+
         logs.append(log_entry)
 
+    # Determine next_since for pagination
     if logs:
-        next_since = logs[-1]["device_timestamp"]
+        next_since = logs[-1].get("device_timestamp")
     else:
         next_since = None
 
