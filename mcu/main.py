@@ -1,38 +1,52 @@
-# ==============================================================================
-# 1. Polls Mock Database for Logs (Port 8000)
-# 2. Reads REAL Temperature from Si7021 Sensor
-# 3. If Database sends ERROR -> Captures context -> Sends to LLM (Port 5001)
-# ==============================================================================
-from machine import Pin, I2C
-import ssd1306
-from si7021 import Si7021
-import time
+"""
+main.py
+
+MicroPython client running on HUZZAH32 v2.
+
+Responsibilities:
+- Connect to Wi‑Fi using credentials from config.py.
+- Periodically fetch log records from the logs server (/logs endpoint).
+- Read real temperature and humidity from the Si7021 sensor over I2C.
+- For error episodes, capture a window of pre/post logs, enrich each record
+  with the closest-in-time sensor_temperature and sensor_humidity readings,
+  and POST the enriched sequence to the LLM server.
+"""
+
 import network
-import urequests
 import ntptime
+import time
+import urequests
+
+from machine import Pin, I2C
+
+import ssd1306
+import config
+from si7021 import Si7021
 
 # ------------------------------------------------------------------------------
 # 1. CONFIGURATION
 # ------------------------------------------------------------------------------
-WIFI_SSID = "parzival"
-WIFI_PASS = "82cmez3b3l18"
+WIFI_SSID = config.WIFI_SSID
+WIFI_PASS = config.WIFI_PASS
 
-# SERVER CONFIGURATION (Using your Hotspot IP)
-# Mock Database
-DB_BASE_URL = "http://172.20.10.4:8000/logs"
-DEVICE_ID = "ventilator-01"
+LOGS_SERVER_URL = config.LOGS_SERVER_URL
+DEVICE_ID = config.DEVICE_ID
 
-# LLM Server
-LLM_URL = "http://172.20.10.4:5001/api/ingest"
+LLM_SERVER_URL = config.LLM_SERVER_URL
 
-# RECORDING SETTINGS
+MAX_SENSOR_READINGS_BUFFER_SIZE = 300
+
 PRE_ERROR_LOGS = 20
 POST_ERROR_LOGS = 20
+
 POLL_DELAY = 1.5  # Seconds between checks
 
 # ------------------------------------------------------------------------------
 # 2. HARDWARE SETUP (OLED + Si7021 Temperature Sensor)
 # ------------------------------------------------------------------------------
+MAX_DISPLAY_CHARS = 16  # 128 pixels / 8 px per char
+LINE_HEIGHT = 8  # 8 px per text row
+
 # Enable power to STEMMA QT / I2C port (required for ESP32 Feather V2)
 i2c_power = Pin(2, Pin.OUT)
 i2c_power.value(1)
@@ -91,12 +105,59 @@ def read_humidity():
         return 50.0
 
 
-def update_display(line1, line2):
+def _format_line(text, align):
+    """
+    Format a single line to MAX_DISPLAY_CHARS with the given alignment.
+    align: "left", "center", or "right"
+    """
+    if text is None:
+        text = ""
+    s = str(text)[:MAX_DISPLAY_CHARS]  # truncate if too long
+    pad = MAX_DISPLAY_CHARS - len(s)
+
+    if align == "right":
+        return " " * pad + s
+    elif align == "center":
+        left = pad // 2
+        right = pad - left
+        return " " * left + s + " " * right
+    else:  # default to left
+        return s + " " * pad
+
+
+def write_lines_to_display(
+    line1=None,
+    line2=None,
+    line3=None,
+    line4=None,
+):
+    """
+    Draw up to 4 lines on the OLED.
+
+    Each argument is either:
+      - None (line not drawn), or
+      - (text, align) where align is "left", "center", or "right".
+
+    Example:
+        write_lines_to_display(
+            ("Monitoring...", "left"),
+            ("T:25.3C H:40%", "right"),
+        )
+    """
     if not HAS_SCREEN:
         return
+
     oled.fill(0)
-    oled.text(line1, 0, 0, 1)
-    oled.text(line2, 0, 12, 1)
+
+    lines = [line1, line2, line3, line4]
+    for idx, spec in enumerate(lines):
+        if spec is None:
+            continue
+        text, align = spec
+        formatted = _format_line(text, align)
+        y = idx * LINE_HEIGHT
+        oled.text(formatted, 0, y, 1)
+
     oled.show()
 
 
@@ -153,8 +214,7 @@ def connect_wifi():
 
 
 def fetch_logs(current_since):
-    # Ask Mock DB for new logs
-    url = f"{DB_BASE_URL}?device_id={DEVICE_ID}&limit=1&since={current_since}"
+    url = f"{LOGS_SERVER_URL}?device_id={DEVICE_ID}&limit=1&since={current_since}"
     try:
         res = urequests.get(url)
         if res.status_code == 200:
@@ -167,16 +227,18 @@ def fetch_logs(current_since):
     return [], current_since
 
 
-def send_package_to_llm(log_sequence, temp_history):
-    print(f"\n[POST] Sending {len(log_sequence)} logs to LLM...")
-    update_display("Packaging...", "Sending to LLM")
+def send_package_to_llm(log_sequence, sensor_readings_history):
+    print(f"\n[POST] Sending {len(log_sequence)} logs to LLM server...")
+    write_lines_to_display(
+        ("Packaging...", "left"), ("Sending to LLM", "left"), ("server", "center")
+    )
 
     # Filter temps to match log timeframe
-    first_ts = parse_iso_simple(log_sequence[0].get("timestamp", ""))
-    last_ts = parse_iso_simple(log_sequence[-1].get("timestamp", ""))
+    first_ts = parse_iso_simple(log_sequence[0].get("device_timestamp", ""))
+    last_ts = parse_iso_simple(log_sequence[-1].get("device_timestamp", ""))
 
     relevant_temps = []
-    for t in temp_history:
+    for t in sensor_readings_history:
         # +/- 5 seconds buffer
         if t["ts"] >= (first_ts - 5) and t["ts"] <= (last_ts + 5):
             relevant_temps.append(t)
@@ -190,13 +252,36 @@ def send_package_to_llm(log_sequence, temp_history):
 
     headers = {"Content-Type": "application/json"}
     try:
-        res = urequests.post(LLM_URL, json=payload, headers=headers)
+        res = urequests.post(LLM_SERVER_URL, json=payload, headers=headers)
         print(f"[POST] Status: {res.status_code}")
         res.close()
         return True
     except Exception as e:
-        print(f"[POST] LLM Error: {e}")
+        print(f"[POST] LLM Server Error: {e}")
         return False
+
+
+def find_closest_sensor_sample(log_timestamp_iso, sensor_readings_history):
+    """
+    Given a log timestamp (ISO string) and sensor_readings_history list of
+    { "ts": epoch_seconds, "val": temp_c, "humidity": rh },
+    return (sensor_temp, sensor_humidity) for the closest sample in time.
+    """
+    log_ts = parse_iso_simple(log_timestamp_iso)
+    if log_ts == 0 or not sensor_readings_history:
+        # Fallback values
+        return 20.0, 50.0
+
+    closest = sensor_readings_history[0]
+    min_delta = abs(closest["ts"] - log_ts)
+
+    for sample in sensor_readings_history[1:]:
+        delta = abs(sample["ts"] - log_ts)
+        if delta < min_delta:
+            closest = sample
+            min_delta = delta
+
+    return closest["val"], closest["humidity"]
 
 
 # ------------------------------------------------------------------------------
@@ -213,7 +298,7 @@ def main():
     print(f"[I2C] Found devices: {[hex(d) for d in devices]}")
     # Expected: 0x3c (OLED) and 0x40 (Si7021)
 
-    temp_history = []
+    sensor_readings_history = []
     log_buffer = []
 
     state = "MONITORING"
@@ -229,13 +314,13 @@ def main():
         current_temp = read_temperature()
         current_humidity = read_humidity()
         # Server expects: {"ts": float, "val": float, "humidity": float}
-        temp_history.append(
+        sensor_readings_history.append(
             {"ts": time.time(), "val": current_temp, "humidity": current_humidity}
         )
-        if len(temp_history) > 300:
-            temp_history.pop(0)
+        if len(sensor_readings_history) > MAX_SENSOR_READINGS_BUFFER_SIZE:
+            sensor_readings_history.pop(0)
 
-        # B. FETCH LOGS (From Mock DB)
+        # B. FETCH LOGS
         new_logs, next_since = fetch_logs(cursor_since)
         if next_since:
             cursor_since = next_since
@@ -243,38 +328,55 @@ def main():
         # C. PROCESS LOGS
         for log in new_logs:
             log_buffer.append(log)
-            print(f"[LOG] {log.get('message', '')}")
+            # server now uses device_message
+            print(f"[LOG] {log.get('device_message', '')}")
 
             if state == "MONITORING":
                 # Keep buffer small
                 if len(log_buffer) > PRE_ERROR_LOGS + 1:
                     log_buffer.pop(0)
 
-                # TRIGGER: Check if Mock DB sent an error
-                if log.get("error_code") is not None:
+                # TRIGGER: Check if server sent an error (MAUDE error code)
+                if log.get("maude_error_code") is not None:
                     print("!!! ERROR DETECTED !!!")
                     state = "COLLECTING_POST_ERROR"
                     logs_needed_after_error = POST_ERROR_LOGS
-                    update_display("ERROR!", "Capturing...")
+                    write_lines_to_display(("ERROR!", "left"), ("Capturing...", "left"))
 
             elif state == "COLLECTING_POST_ERROR":
                 logs_needed_after_error -= 1
-                update_display("Capturing...", f"Left: {logs_needed_after_error}")
+                write_lines_to_display(
+                    ("Capturing...", "left"),
+                    (f"Left: {logs_needed_after_error}", "left"),
+                )
 
                 if logs_needed_after_error <= 0:
-                    # DONE! Send to LLM
-                    send_package_to_llm(log_buffer, temp_history)
+                    # DONE! Enrich logs with closest sensor readings and send to LLM server
+                    enriched_logs = []
+                    for log in log_buffer:
+                        enriched = dict(log)
+                        ts_iso = log.get("device_timestamp", "")
+                        sensor_temp, sensor_humidity = find_closest_sensor_sample(
+                            ts_iso, sensor_readings_history
+                        )
+                        enriched["sensor_temperature"] = sensor_temp
+                        enriched["sensor_humidity"] = sensor_humidity
+                        enriched_logs.append(enriched)
+
+                    send_package_to_llm(enriched_logs, sensor_readings_history)
                     log_buffer = []
                     state = "MONITORING"
-                    update_display("Sent!", "Monitoring...")
+                    write_lines_to_display(("Sent!", "left"), ("Monitoring...", "left"))
 
         # Display Current Status
         if state == "MONITORING":
-            update_display("Monitoring...", f"T:{current_temp}C H:{current_humidity}%")
+            write_lines_to_display(
+                ("Monitoring...", "left"),
+                (f"T:{current_temp}C H:{current_humidity}%", "right"),
+            )
 
         time.sleep(POLL_DELAY)
 
 
 if __name__ == "__main__":
     main()
-
