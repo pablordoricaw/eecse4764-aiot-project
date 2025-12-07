@@ -287,59 +287,127 @@ async def analyze_with_rag_fewshot(all_logs: List[dict]):
 ║                    FEW-SHOT EXAMPLES                               ║
 ╚═══════════════════════════════════════════════════════════════════╝
 
-EXAMPLE 1: Temperature & Humidity Sensor Failure
-─────────────────────────────────────
-Error Code: E-SENSOR-FAIL
-Device: Ventilator
-Temp Readings: [21.2, 21.0, -999, -999] (sensor disconnect)
-Humidity Readings: [55%, 54%, 0%, 0%] (sensor disconnect)
-Logs: [INFO] System OK → [WARN] Sensor fluctuation → [ERROR] Sensor failure
+IMPORTANT: You receive TWO types of data:
+1. Device messages/error codes (from the medical device itself - may include internal temps like "77°C")
+2. Room sensor data (temperature & humidity from ESP32 room sensors)
 
-Diagnosis:
-- FDA Error Code: Sensor Malfunction (SMF-001)
-- Severity: High
-- Root Cause: Environmental sensor hardware failure (invalid readings indicate disconnect)
-- Troubleshooting:
-  1. Check sensor cable connections
-  2. Replace sensor module
-  3. Recalibrate after replacement
+Your job: Cross-reference device messages with room conditions to diagnose root cause.
+
 
 ─────────────────────────────────────
-EXAMPLE 2: Thermal Management Failure with High Humidity
+EXAMPLE 1: Device Reports Temp Error + Room Is Hot (Environmental Cause)
 ─────────────────────────────────────
-Error Code: E-TEMP-OVER-THRESH
 Device: Medical Monitor
-Temp Readings: [72.1, 73.4, 75.8, 78.2] (rising trend)
-Humidity Readings: [45%, 43%, 40%, 38%] (decreasing - dry air)
-Logs: [INFO] Normal → [WARN] Fan RPM low → [WARN] Temp rising → [ERROR] Threshold exceeded
+Device Message: "Temperature threshold exceeded: 77°C"
+Device Error Code: TEMP_OVER_THRESHOLD
+Room Sensors: Temp=38°C (very hot room), Humidity=25%
 
 Diagnosis:
-- FDA Error Code: Thermal Management Failure (TMF-003)
-- Severity: Critical
-- Root Cause: Cooling system degradation, dry air reducing heat dissipation efficiency
-- Troubleshooting:
-  1. IMMEDIATE: Power down device
-  2. Inspect cooling fan for obstructions
-  3. Check ventilation ports
-  4. Replace cooling fan if RPM <2000
+- FDA Error Code: Environmental Overheating (ENV-701)
+- Severity: HIGH
+- Device Status: Degraded - Overheating due to environment
+- Root Cause: Device internal temp (77°C) exceeds safe threshold. Room temperature is extremely high (38°C), which is outside recommended operating range (15-30°C). The hot environment is preventing adequate heat dissipation.
+- Evidence from device: Explicitly reports 77°C - well above normal operating range
+- Evidence from room sensors: Ambient temp 38°C is abnormally high, explains why device cannot cool itself
+- Contributing factors: Possible ventilation blockage combined with hot environment
+- Confidence: 95%
+
+Troubleshooting:
+1. IMMEDIATE: Power down device to prevent component damage
+2. IMMEDIATE: Move device to climate-controlled area (20-25°C)
+3. DIAGNOSTIC: Once in cool environment, check if device temp normalizes
+4. CORRECTIVE: Clean ventilation ports, ensure adequate airflow
+5. PREVENTIVE: Monitor room temperature, use device in climate-controlled areas only
+
+Safety Assessment:
+- Patient Risk: MEDIUM (device failure risk)
+- Continue Use: NO - Relocate to proper environment first
+- Escalate: If device continues overheating in normal room temps, hardware failure likely
 
 ─────────────────────────────────────
-EXAMPLE 3: Condensation Risk
+EXAMPLE 2: Device Reports Temp Error + Room Is Normal (Internal Failure)
 ─────────────────────────────────────
-Error Code: E-HUMIDITY-HIGH
 Device: Imaging Device
-Temp Readings: [20.5, 20.3, 20.1, 19.8] (decreasing)
-Humidity Readings: [75%, 78%, 82%, 85%] (rising - condensation risk)
-Logs: [INFO] All systems nominal → [WARN] High humidity detected → [ERROR] Condensation risk
+Device Message: "Internal temperature critical: 82°C"
+Device Error Code: TEMP_CRITICAL
+Room Sensors: Temp=22°C (normal), Humidity=45%
 
 Diagnosis:
-- FDA Error Code: Environmental Control Warning (ENV-402)
-- Severity: Medium
-- Root Cause: High humidity with cooling temps creates condensation risk
-- Troubleshooting:
-  1. Move device to climate-controlled area
-  2. Enable dehumidification if available
-  3. Monitor for water ingress
+- FDA Error Code: Cooling System Failure (CSF-203)
+- Severity: CRITICAL
+- Device Status: FAILED - Internal component malfunction
+- Root Cause: Device reports critical internal temperature (82°C) despite normal room conditions (22°C). This indicates internal cooling system failure - fans not operating or vents blocked. The room is at ideal temperature, so environmental factors are ruled out.
+- Evidence from device: Reports 82°C internal temperature
+- Evidence from room sensors: Room temp is normal (22°C), so external environment is not the cause
+- Confidence: 98%
+
+Troubleshooting:
+1. IMMEDIATE: Power down device to prevent fire hazard
+2. DIAGNOSTIC: Inspect cooling fan operation (listen for fan noise)
+3. DIAGNOSTIC: Check ventilation ports for dust/debris blockage
+4. CORRECTIVE: Replace cooling fan if not spinning
+5. CORRECTIVE: Deep clean ventilation system if blocked
+6. PREVENTIVE: Do not operate until device maintains safe temp <60°C
+
+Safety Assessment:
+- Patient Risk: HIGH (device failure, potential fire hazard)
+- Continue Use: NO - Hardware repair required
+- Escalate: Immediate biomedical engineering intervention required
+
+─────────────────────────────────────
+EXAMPLE 3: High Humidity Causing Condensation Risk
+─────────────────────────────────────
+Device: Surgical Probe
+Device Message: "Condensation detected on sensor array"
+Device Error Code: MOISTURE_WARNING
+Room Sensors: Temp=18°C (cold), Humidity=85% (very high)
+
+Diagnosis:
+- FDA Error Code: Environmental Moisture Risk (ENV-402)
+- Severity: MEDIUM
+- Device Status: At Risk - Environmental issue
+- Root Cause: High humidity (85%) combined with cold temperature (18°C) creates condensation on device components. This is an environmental problem, not device failure.
+- Evidence from device: Explicitly detects moisture/condensation
+- Evidence from room sensors: 85% humidity is excessive, 18°C is below recommended operating temp
+- Confidence: 95%
+
+Troubleshooting:
+1. IMMEDIATE: Wipe condensation from device with sterile cloth
+2. IMMEDIATE: Move device to climate-controlled area (20-25°C, 40-60% humidity)
+3. DIAGNOSTIC: Allow device to acclimate to new environment for 30 minutes
+4. PREVENTIVE: Use dehumidifier in operating area
+5. PREVENTIVE: Keep device storage area climate-controlled
+
+Safety Assessment:
+- Patient Risk: LOW (device still functional)
+- Continue Use: Only after moving to proper environment
+- Escalate: If condensation persists in normal environment, internal seal may be compromised
+
+─────────────────────────────────────
+EXAMPLE 4: Device Normal + Room Normal = All Good
+─────────────────────────────────────
+Device: Patient Monitor
+Device Message: "All systems operational, self-test passed, internal temp: 42°C"
+Device Error Code: STATUS_OK
+Room Sensors: Temp=23°C, Humidity=50%
+
+Diagnosis:
+- FDA Error Code: Normal Operation (NOP-000)
+- Severity: None
+- Device Status: Operational
+- Root Cause: Device explicitly reports internal temp (42°C) which is within normal operating range. Room conditions are ideal (23°C, 50% humidity). All systems functioning correctly.
+- Evidence from device: Self-test passed, reports actual internal temp of 42°C
+- Evidence from room sensors: Optimal environmental conditions
+- Confidence: 99%
+
+Troubleshooting:
+1. Continue normal operation
+2. Maintain routine preventive maintenance schedule
+
+Safety Assessment:
+- Patient Risk: None
+- Continue Use: Yes
+- Escalate: Only if conditions change
 
 """
 
@@ -407,17 +475,29 @@ Diagnosis:
 ║                    YOUR DIAGNOSIS                                  ║
 ╚═══════════════════════════════════════════════════════════════════╝
 
-Analyze this case using:
-1. The few-shot examples above as templates
-2. The similar historical cases (if provided) as context
-3. The actual log sequence, temperature data, and humidity data
+**CRITICAL: Cross-Reference Device Messages with Room Sensors**
 
-Pay special attention to:
-- Temperature and humidity correlation (high humidity + low temp = condensation risk)
-- Sensor reading validity (invalid values indicate hardware failure)
-- Trend analysis (rising/falling patterns indicate root cause)
+Device-Specific Expected Operating Ranges:
+- VENTILATORS: Normal = ~45°C internal, Overheating = >70°C
+- MONITORS/IMAGING: Normal = 35-50°C, Overheating = >65°C
+- Room conditions should be: 18-28°C, 30-70% humidity
 
-Provide diagnosis in this format:
+**Your Diagnostic Process:**
+1. **Check if device reports internal temperature** in its message
+   - If YES: Compare device temp to expected range AND room temp
+   - If NO: Use room sensors as only temperature reference
+
+2. **Cross-reference device status with room conditions:**
+   - Device says "OK" + Only room temp visible = SUSPICIOUS (device may be malfunctioning)
+   - Device reports high temp + Room is hot = Environmental cause
+   - Device reports high temp + Room is normal = Internal failure
+   - Device reports condensation + High room humidity = Environmental cause
+
+3. **Use few-shot examples as templates** for similar scenarios
+
+4. **Leverage RAG similar cases** if provided
+
+Analyze this case and provide diagnosis in this format:
 
 ## FDA ERROR CLASSIFICATION
 - FDA Error Code: [Code]
@@ -427,9 +507,9 @@ Provide diagnosis in this format:
 ## ROOT CAUSE ANALYSIS
 - Primary Cause: [explanation]
 - Contributing Factors: [list]
-- Evidence from logs: [cite specific logs]
-- Evidence from temperature: [cite trends]
-- Evidence from humidity: [cite trends and correlation with temp]
+- Evidence from device: [cite device messages and any internal temps reported]
+- Evidence from room sensors: [cite room temp/humidity and how it relates to the problem]
+- Cross-reference analysis: [explain how device status + room conditions reveal root cause]
 - Confidence: [percentage]
 
 ## TROUBLESHOOTING STEPS
@@ -443,7 +523,7 @@ Provide diagnosis in this format:
 - Continue Use: [Yes/No/Restrictions]
 - Escalate: [conditions]
 
-Base your analysis on the patterns shown in examples and similar cases.
+Base your analysis on cross-referencing device messages with room sensor data, using patterns from examples and similar cases.
 """
 
     # Get LLM response
