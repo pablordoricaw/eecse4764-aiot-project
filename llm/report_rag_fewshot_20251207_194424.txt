@@ -1,0 +1,107 @@
+======================================================================
+MEDICAL DEVICE DIAGNOSTIC REPORT
+Model: RAG + Few-Shot with GPT + BioBERT
+======================================================================
+
+Report Generated: 2025-12-07 19:44:24.562828
+Device ID: ventilator-01
+
+ERROR SUMMARY
+----------------------------------------------------------------------
+Error Code: E-TEMP-HIGH
+Message: Internal ventilator temperature above limit for 33.7 s on breath 14 (77.9 °C)
+Timestamp: 2025-12-07T01:39:51.007988+00:00
+Subsystem: SENSORS
+
+SIMILAR HISTORICAL CASES (RAG)
+----------------------------------------------------------------------
+1. ERROR 3 (similarity: 97.6%)
+   Device: temperature_sensor, Temp: 16.3°C, Humidity: 82.4%
+   Severity: Medium, FDA Code: Temperature Regulation Failure (TMF-250)
+   Root Cause: Cooling system malfunction causing low operating temperature. Contributing factors: Cold storage or ambient temperature below minimum spec. Confidence level: 84%
+
+2. ERROR 1 (similarity: 97.6%)
+   Device: temperature_sensor, Temp: 26.6°C, Humidity: 62.6%
+   Severity: Critical, FDA Code: Communication Failure (COM-788)
+   Root Cause: USB cable disconnection. Contributing factors: Possible environmental interference or component degradation. Confidence level: 80%
+
+3. ERROR 1 (similarity: 97.6%)
+   Device: temperature_sensor, Temp: 25.6°C, Humidity: 64.1%
+   Severity: Medium, FDA Code: Communication Failure (COM-862)
+   Root Cause: USB cable disconnection. Contributing factors: Possible environmental interference or component degradation. Confidence level: 78%
+
+
+======================================================================
+LLM DIAGNOSTIC ANALYSIS
+======================================================================
+
+╔═══════════════════════════════════════════════════════════════════╗  
+║                          DIAGNOSIS REPORT                          ║  
+╚═══════════════════════════════════════════════════════════════════╝  
+
+**Device:** ventilator-01  
+**Error:** E-TEMP-HIGH — Internal ventilator temperature above limit (77.9 °C for 33.7 s)  
+**Subsystem:** SENSORS  
+**Error Severity:** Critical (Internal temp > 70°C threshold for ventilators)  
+
+---
+
+### Room Environment Summary  
+- Temperature: 24.8°C (stable) — Within recommended room temp range (18-28°C)  
+- Humidity: 18.9% (stable) — Below recommended humidity range (30-70%)  
+
+---
+
+### Analysis  
+
+1. **Device Internal Temperature:**  
+   - The ventilator’s internal temperature is critically high at 77.9°C, well above the acceptable maximum (~45°C normal, >70°C overheating).  
+   - Prolonged overheating (33.7 s) poses serious risks of hardware damage or failure.  
+
+2. **Room Conditions:**  
+   - Ambient temperature is within acceptable limits for device operation.  
+   - Ambient humidity is low (18.9%), below the recommended 30-70% range. This low humidity can contribute to electrostatic discharge risk and may affect cooling efficiency or sensor performance.  
+
+3. **Cross-Reference With Historical Cases:**  
+   - No direct match in historical cases for overheating at normal room temperature but low humidity is a notable environmental factor.  
+   - Historical cases with temperature sensor errors mostly point to cooling system failures or communication issues, but none with internal temps as high as this.  
+
+4. **Probable Root Cause:**  
+   - **Cooling system malfunction or failure** inside the ventilator causing internal temperature to rise despite stable and acceptable room temperature.  
+   - Low ambient humidity may exacerbate internal thermal regulation or sensor readings but is likely a secondary contributor.  
+
+---
+
+### Recommended Troubleshooting Steps  
+
+| Step | Action                                                                                 |
+|-------|----------------------------------------------------------------------------------------|
+| 1     | Immediately power down ventilator to prevent hardware damage or patient risk.          |
+| 2     | Inspect and test ventilator’s internal cooling system (fans, heat sinks, thermal sensors). |
+| 3     | Check for airflow obstructions within device casing or vents.                          |
+| 4     | Verify firmware/software controlling temperature regulation is up to date.            |
+| 5     | Confirm power supply stability and voltage levels (overvoltage can cause overheating). |
+| 6     | Increase room humidity towards recommended 30-70% range to optimize device environment.|
+| 7     | If problem persists, contact device manufacturer for service or replacement.           |
+
+---
+
+### FDA Regulatory Notes  
+
+- **FDA Code:** Thermal Management Failure (TMF-xxx, similar to TMF-250 in historical cases)  
+- **Severity:** Critical — Immediate intervention required to prevent patient harm  
+- **Documentation:** Record all events, environmental conditions, and corrective actions for compliance.  
+
+---
+
+### Summary  
+
+The ventilator is experiencing a critical internal overheating event despite stable and acceptable ambient temperature, with low humidity as a possible contributing factor. The root cause is most likely a malfunction in the device’s cooling system or internal thermal regulation. Immediate shutdown and technical inspection are mandatory to ensure patient safety and device integrity.  
+
+---
+
+If you need assistance with specific diagnostic commands or interfacing with the device logs, I am here to help.
+
+======================================================================
+END OF REPORT
+======================================================================

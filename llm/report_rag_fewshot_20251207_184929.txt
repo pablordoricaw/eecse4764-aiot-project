@@ -1,0 +1,47 @@
+======================================================================
+MEDICAL DEVICE DIAGNOSTIC REPORT
+Model: RAG + Few-Shot with GPT-4o-mini + BioBERT
+======================================================================
+
+Report Generated: 2025-12-07 18:49:29.698001
+Device ID: ventilator-01
+
+ERROR SUMMARY
+----------------------------------------------------------------------
+Error Code: SENSOR_READ_OK
+Message: Sensors within expected range for breath 14
+Timestamp: 2025-12-07T01:39:51.007599+00:00
+Subsystem: SENSORS
+
+
+======================================================================
+LLM DIAGNOSTIC ANALYSIS
+======================================================================
+
+## FDA ERROR CLASSIFICATION
+- FDA Error Code: NOP-000 (Normal Operation)
+- Severity: None
+- Device Status: Operational
+
+## ROOT CAUSE ANALYSIS
+- Primary Cause: No fault detected. The ventilator sensors report readings within expected ranges and stable conditions. Internal temperature is not explicitly reported but inferred to be normal given no overheating messages.
+- Contributing Factors: None
+- Evidence from device: Device messages indicate "Sensors within expected range for breath 14" and "Control loop stable" with stable temperature reading of 25.7°C.
+- Evidence from room sensors: Room temperature is 25.7°C and humidity is 20.0%. Temperature is within recommended range (18-28°C), although humidity is slightly below the typical 30-70% range but not critical.
+- Cross-reference analysis: Device reports no errors or abnormal temperatures; room conditions are within acceptable limits for operation. Stable sensor readings and control loops confirm normal function.
+- Confidence: 99%
+
+## TROUBLESHOOTING STEPS
+1. IMMEDIATE: Continue normal operation, no immediate action required.
+2. DIAGNOSTIC: Perform routine sensor calibration checks as per preventive maintenance schedule.
+3. CORRECTIVE: None needed at this time.
+4. PREVENTIVE: Maintain room temperature between 18-28°C and humidity ideally between 30-70%. Consider humidification if room humidity remains below 30% for extended periods.
+
+## SAFETY ASSESSMENT
+- Patient Risk: None
+- Continue Use: Yes
+- Escalate: Only if device status changes or abnormal temperature/humidity detected, or sensor readings become unstable.
+
+======================================================================
+END OF REPORT
+======================================================================
