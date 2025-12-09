@@ -95,29 +95,7 @@ The medical device subsystem is made of 3 Python modules:
 
 The ventilator is the simulated medical device that writes logs files. These log files are consumed by the logs pipeline which inserts each log record into a SQLite database. Lastly, the logs server responds to HTTP GET requests on its `/logs` endpoint by to serve the log records from the database.
 
-```text
-
-+--------------------+        +----------------------+        +--------------------+
-|  ventilator_01.py  |        |   logs_pipeline.py   |        |   logs_server.py   |
-|--------------------|        |----------------------|        |--------------------|
-| - Simulated        |  JSONL | - Watches logs dir   |  SQL   | - FastAPI server   |
-|   ventilator       +------->+ - Parses JSONL       +------->+ - Serves /logs     |
-| - Logs to stdout   |  files | - Computes log_id    |  DB    |   from SQLite      |
-|   / stderr         |        | - Inserts into DB    |        | - Used by MCU      |
-+---------+----------+        +----------+-----------+        +---------+----------+
-          |                              |                               |
-          |                              |                               |
-          v                              v                               v
-   +--------------+             +----------------+               +-----------------+
-   | logs/        |             | logs.db (SQLite)|              |   HTTP client   |
-   |  ventilator. |             |   logs table    |              |  (HTTP GET /logs|
-   |  latest.log. |             |  (dedup by      |              |   ?device_id...)|
-   |  jsonl       |             |   log_id)       |              +-----------------+
-   |  ventilator. |             +-----------------+
-   |  <ts>.log.   |
-   |  jsonl       |
-   +--------------+
-```
+<img src="./project_website/images/aiot-project-medical-device-system-dataflow.png">
 
 ### How to Run
 
@@ -165,6 +143,8 @@ Then each Python module needs to be run separately, so in 3 different terminal s
     ```
 
 ## LLM Server Subsystem
+
+<img src="/project_website/images/aiot-project-llm-server-system-dataflow.png">
 
 ### How to Run
 
