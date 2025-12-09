@@ -1,26 +1,66 @@
+"""
+llm_server.py
+
+Medical Device Diagnostic Server - RAG + Few-Shot
+
+Responsibilities:
+- Expose an HTTP API to receive enriched error packets from the MCU.
+- Parse device_* / maude_* / sensor_* fields and raw sensor readings.
+- Build a diagnostic prompt and query an LLM via Poe.
+- Save a textual diagnostic report to disk.
+"""
+
+import argparse
+import asyncio
+import json
+import os
+import re
+from dataclasses import dataclass, field
+from datetime import datetime
+from json import JSONDecodeError
+from typing import Any, Dict, List, Optional
+
+import fastapi_poe as fp
+import numpy as np
+import torch
+import uvicorn
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
-from typing import List, Dict
-from datetime import datetime
-import uvicorn
-import fastapi_poe as fp
-from transformers import AutoTokenizer, AutoModel
-import torch
-import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-import json
-from json import JSONDecodeError
 from tqdm import tqdm
-import re
+from transformers import AutoModel, AutoTokenizer
 
-app = FastAPI(title="Medical Device Diagnostic - RAG + Few-Shot")
 
 # ==============================================================================
-# CONFIGURATION
+# CONFIGURATION DATA CLASSES
 # ==============================================================================
-POE_API_KEY = "aA_SPfposL5Zgrm3qft9ufaalxrjpkZdvElonE2lG4w"
-LLM_MODEL = "GPT-4.1-Mini"
-TRAINING_DATA_PATH = "medical_device_training_with_humidity.jsonl"
+
+
+@dataclass
+class AppConfig:
+    poe_api_key: str
+    llm_model: str
+    biobert_model_name: str
+    training_data_path: str
+    reports_path: str
+
+
+@dataclass
+class RagState:
+    tokenizer: Optional[AutoTokenizer] = None
+    biobert_model: Optional[AutoModel] = None
+    has_training_data: bool = False
+    training_data: List[dict] = field(default_factory=list)
+    training_embeddings: Optional[np.ndarray] = None
+    training_info: List[dict] = field(default_factory=list)
+
+
+@dataclass
+class ServerState:
+    config: AppConfig
+    rag: RagState
+    active_sessions: Dict[str, List[dict]] = field(default_factory=dict)
+
 
 # ==============================================================================
 # DATA MODELS - UPDATED FOR NEW SCHEMA
@@ -36,43 +76,62 @@ class SingleLogPacket(BaseModel):
 
 
 # ==============================================================================
-# SESSION MANAGEMENT
+# RAG / BIOBERT INITIALIZATION
 # ==============================================================================
 
-# In-memory storage for accumulating logs from ESP32
-active_sessions: Dict[str, List[dict]] = {}
+
+def load_training_data(path: str) -> (List[dict], bool):
+    training_data: List[dict] = []
+    has_training_data = False
+    print(f"Loading training data from {path}...")
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                data = json.loads(line)
+                training_data.append(data)
+        print(f"Loaded {len(training_data)} training samples")
+        has_training_data = True
+    except Exception as e:
+        print(f"Warning: Could not load training data: {e}")
+        training_data = []
+        has_training_data = False
+    return training_data, has_training_data
 
 
-# ==============================================================================
-# BIOBERT SETUP (RAG)
-# ==============================================================================
+def init_rag_state(config: AppConfig) -> RagState:
+    rag = RagState()
+    print("Loading BioBERT for RAG...")
+    rag.tokenizer = AutoTokenizer.from_pretrained(config.biobert_model_name)
 
-print("Loading BioBERT for RAG...")
-MODEL_NAME = "dmis-lab/biobert-base-cased-v1.1"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-biobert_model = AutoModel.from_pretrained(MODEL_NAME).to(
-    "cuda" if torch.cuda.is_available() else "cpu"
-)
-biobert_model.eval()
-print(f"BioBERT loaded on: {'GPU' if torch.cuda.is_available() else 'CPU'}")
+    if torch.cuda.is_available():
+        rag.biobert_model = AutoModel.from_pretrained(config.biobert_model_name).to(
+            "cuda"
+        )
+        print("BioBERT loaded on: NVIDIA GPU")
+    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        rag.biobert_model = AutoModel.from_pretrained(config.biobert_model_name).to(
+            "mps"
+        )
+        print("BioBERT loaded on: Apple GPU")
+    else:
+        rag.biobert_model = AutoModel.from_pretrained(config.biobert_model_name).to(
+            "cpu"
+        )
+        print("BioBERT loaded on: CPU")
 
-# Load training data from JSONL
-print(f"Loading training data from {TRAINING_DATA_PATH}...")
-training_data = []
-try:
-    with open(TRAINING_DATA_PATH, "r") as f:
-        for line in f:
-            data = json.loads(line)
-            training_data.append(data)
-    print(f"Loaded {len(training_data)} training samples")
-    HAS_TRAINING_DATA = True
-except Exception as e:
-    print(f"Warning: Could not load training data: {e}")
-    training_data = []
-    HAS_TRAINING_DATA = False
+    rag.biobert_model.eval()
+
+    rag.training_data, rag.has_training_data = load_training_data(
+        config.training_data_path
+    )
+
+    if rag.has_training_data:
+        create_training_embeddings(rag)
+
+    return rag
 
 
-def extract_error_info(user_message):
+def extract_error_info(user_message: str):
     """Extract key info from user message for embedding"""
     error_code_match = re.search(r"Error Code: (ERROR \d+)", user_message)
     error_code = error_code_match.group(1) if error_code_match else "UNKNOWN"
@@ -89,7 +148,7 @@ def extract_error_info(user_message):
     return error_code, device_type, temp_avg, humidity_avg
 
 
-def extract_diagnosis_summary(assistant_message):
+def extract_diagnosis_summary(assistant_message: str):
     """Extract key diagnosis info from assistant response"""
     fda_match = re.search(r"FDA Error Code: ([^\n]+)", assistant_message)
     fda_code = fda_match.group(1).strip() if fda_match else "Unknown"
@@ -108,26 +167,25 @@ def extract_diagnosis_summary(assistant_message):
     return fda_code, severity, root_cause, troubleshooting
 
 
-def embed_text(text):
+def embed_text(rag: RagState, text: str) -> np.ndarray:
     """Generate BioBERT embedding"""
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to(
-        biobert_model.device
-    )
+    assert rag.tokenizer is not None and rag.biobert_model is not None
+    inputs = rag.tokenizer(
+        text, return_tensors="pt", truncation=True, max_length=512
+    ).to(rag.biobert_model.device)
     with torch.no_grad():
-        outputs = biobert_model(**inputs)
+        outputs = rag.biobert_model(**inputs)
         vec = outputs.last_hidden_state[:, 0, :].squeeze().cpu().numpy()
     return vec
 
 
-# Create training embeddings at startup
-TRAINING_EMBEDDINGS = None
-TRAINING_INFO = []
-
-if HAS_TRAINING_DATA:
+def create_training_embeddings(rag: RagState) -> None:
+    """Create and store embeddings for training data"""
     print("Creating embeddings for training data...")
-    training_texts = []
+    training_texts: List[str] = []
+    rag.training_info = []
 
-    for sample in training_data:
+    for sample in rag.training_data:
         messages = sample.get("messages", [])
         user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
         assistant_msg = next(
@@ -145,7 +203,7 @@ if HAS_TRAINING_DATA:
         )
         training_texts.append(text)
 
-        TRAINING_INFO.append(
+        rag.training_info.append(
             {
                 "error_code": error_code,
                 "device_type": device_type,
@@ -160,17 +218,24 @@ if HAS_TRAINING_DATA:
             }
         )
 
-    embeddings = []
+    embeddings: List[np.ndarray] = []
     for text in tqdm(training_texts, desc="Embeddings"):
-        embeddings.append(embed_text(text))
+        embeddings.append(embed_text(rag, text))
 
-    TRAINING_EMBEDDINGS = np.vstack(embeddings)
-    print(f"Embeddings ready! ({len(TRAINING_INFO)} cases indexed)")
+    rag.training_embeddings = np.vstack(embeddings)
+    print(f"Embeddings ready! ({len(rag.training_info)} cases indexed)")
 
 
-def find_similar_cases(error_code, device_id, temps, humidities, top_k=3):
+def find_similar_cases(
+    rag: RagState,
+    error_code: str,
+    device_id: str,
+    temps: List[float],
+    humidities: List[float],
+    top_k: int = 3,
+) -> List[dict]:
     """Find similar historical cases using BioBERT"""
-    if not HAS_TRAINING_DATA:
+    if not rag.has_training_data or rag.training_embeddings is None:
         return []
 
     avg_temp = sum(temps) / len(temps) if temps else 25.0
@@ -181,13 +246,13 @@ def find_similar_cases(error_code, device_id, temps, humidities, top_k=3):
         f"Temp: {avg_temp:.1f}°C, Humidity: {avg_humidity:.1f}%"
     )
 
-    query_embedding = embed_text(query_text).reshape(1, -1)
-    similarities = cosine_similarity(query_embedding, TRAINING_EMBEDDINGS)[0]
+    query_embedding = embed_text(rag, query_text).reshape(1, -1)
+    similarities = cosine_similarity(query_embedding, rag.training_embeddings)[0]
     top_indices = np.argsort(similarities)[-top_k:][::-1]
 
-    similar_cases = []
+    similar_cases: List[dict] = []
     for idx in top_indices:
-        info = TRAINING_INFO[idx]
+        info = rag.training_info[idx]
         similar_cases.append(
             {
                 "similarity": float(similarities[idx]),
@@ -210,14 +275,14 @@ def find_similar_cases(error_code, device_id, temps, humidities, top_k=3):
 # ==============================================================================
 
 
-async def get_llm_response(prompt):
+async def get_llm_response(config: AppConfig, prompt: str) -> Optional[str]:
     """Query Poe API"""
-    full_response = []
+    full_response: List[str] = []
     try:
         async for partial in fp.get_bot_response(
             messages=[fp.ProtocolMessage(role="user", content=prompt)],
-            bot_name=LLM_MODEL,
-            api_key=POE_API_KEY,
+            bot_name=config.llm_model,
+            api_key=config.poe_api_key,
         ):
             full_response.append(partial.text)
         return "".join(full_response)
@@ -238,7 +303,7 @@ def extract_from_llm_response(llm_response):
 # ==============================================================================
 
 
-async def analyze_with_rag_fewshot(all_logs: List[dict]):
+async def analyze_with_rag_fewshot(state: ServerState, all_logs: List[dict]) -> str:
     """Main analysis function using RAG + Few-Shot"""
 
     error_log = all_logs[2]
@@ -270,6 +335,7 @@ async def analyze_with_rag_fewshot(all_logs: List[dict]):
     }
 
     similar_cases = find_similar_cases(
+        state.rag,
         error_log.get("maude_error_code") or error_log.get("device_event_code"),
         device_id,
         temps,
@@ -280,7 +346,7 @@ async def analyze_with_rag_fewshot(all_logs: List[dict]):
     prompt = """You are a medical device diagnostic AI assistant specialized in FDA-regulated equipment.
 
 ╔═══════════════════════════════════════════════════════════════════╗
-║                    FEW-SHOT EXAMPLES                               ║
+║                    FEW-SHOT EXAMPLES                              ║
 ╚═══════════════════════════════════════════════════════════════════╝
 
 IMPORTANT: You receive TWO types of data:
@@ -292,11 +358,10 @@ Your job: Cross-reference device messages with room conditions to diagnose root 
 
     # (Prompt body omitted here for brevity; keep your existing examples and analysis text)
 
-    # Add RAG context if available
     if similar_cases:
         prompt += """
 ╔═══════════════════════════════════════════════════════════════════╗
-║              SIMILAR HISTORICAL CASES (RAG)                        ║
+║              SIMILAR HISTORICAL CASES (RAG)                       ║
 ╚═══════════════════════════════════════════════════════════════════╝
 
 """
@@ -313,7 +378,7 @@ Your job: Cross-reference device messages with room conditions to diagnose root 
 
     prompt += f"""
 ╔═══════════════════════════════════════════════════════════════════╗
-║                    CURRENT CASE TO ANALYZE                         ║
+║                    CURRENT CASE TO ANALYZE                        ║
 ╚═══════════════════════════════════════════════════════════════════╝
 
 **Device ID:** {device_id}
@@ -353,7 +418,7 @@ Your job: Cross-reference device messages with room conditions to diagnose root 
 
     prompt += """
 ╔═══════════════════════════════════════════════════════════════════╗
-║                    YOUR DIAGNOSIS                                  ║
+║                    YOUR DIAGNOSIS                                 ║
 ╚═══════════════════════════════════════════════════════════════════╝
 
 **CRITICAL: Cross-Reference Device Messages with Room Sensors**
@@ -366,8 +431,8 @@ Device-Specific Expected Operating Ranges:
 [... keep your existing diagnostic instructions here ...]
 """
 
-    print("\n[LLM] Querying GPT-4.x with RAG + Few-Shot...")
-    response = await get_llm_response(prompt)
+    print("\n[LLM] Querying GPT with RAG + Few-Shot...")
+    response = await get_llm_response(state.config, prompt)
 
     if response:
         response = extract_from_llm_response(response)
@@ -382,10 +447,15 @@ Device-Specific Expected Operating Ranges:
 # ==============================================================================
 
 
-def save_diagnostic_report(all_logs: List[dict], diagnosis: str, similar_cases: list):
-    """Save complete report"""
+def save_diagnostic_report(
+    state: ServerState, all_logs: List[dict], diagnosis: str, similar_cases: List[dict]
+) -> str:
+    """Save complete report into reports_path"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"report_rag_fewshot_{timestamp}.txt"
+    os.makedirs(state.config.reports_path, exist_ok=True)
+    filename = os.path.join(
+        state.config.reports_path, f"report_rag_fewshot_{timestamp}.txt"
+    )
 
     error_log = all_logs[2]
 
@@ -435,168 +505,253 @@ def save_diagnostic_report(all_logs: List[dict], diagnosis: str, similar_cases: 
 
 
 # ==============================================================================
-# API ENDPOINTS
+# FASTAPI APP FACTORY AND ROUTES
 # ==============================================================================
 
 
-@app.post("/api/ingest")
-async def ingest_log_raw(request: Request):
-    """
-    Raw ingest endpoint that:
-    - Reads the body as text.
-    - Tries json.loads.
-    - If it fails at end-of-input, appends '}' once and retries.
-    - Then validates against SingleLogPacket and runs existing logic.
-    """
-    raw = await request.body()
-    try:
-        raw_text = raw.decode("utf-8")
-    except Exception:
-        raw_text = raw.decode("utf-8", errors="replace")
+async def process_log_sequence(srv, all_logs):
+    print("\n" + "=" * 70)
+    print("ALL LOGS RECEIVED - STARTING ANALYSIS")
+    print("=" * 70)
 
-    payload_dict = None
-    try:
-        payload_dict = json.loads(raw_text)
-    except JSONDecodeError as e:
-        # If error is at the very end, try appending a closing brace
-        if e.pos >= len(raw_text) - 1:
-            fixed_text = raw_text + "}"
-            try:
-                payload_dict = json.loads(fixed_text)
-                print("[INGEST] JSON parsed after appending '}'")
-            except Exception as e2:
-                print(f"[INGEST] Still could not parse JSON after fix: {e2}")
-                raise
-        else:
-            print(f"[INGEST] JSON decode error (no fix attempted): {e}")
-            raise
+    error_log = all_logs[2]
+    device_id = all_logs[0]["device_id"]
 
-    # Now validate/parse with Pydantic
-    packet = SingleLogPacket(**payload_dict)
+    temps = [log["sensor_temp_c"] for log in all_logs]
+    humidities = [log["sensor_humidity"] for log in all_logs]
 
-    device_id = packet.log["device_id"]
-
-    if device_id not in active_sessions:
-        active_sessions[device_id] = []
-        print(f"\n[SESSION] Started new session for device: {device_id}")
-
-    active_sessions[device_id].append(packet.log)
-
-    print(f"[LOG {packet.log_index}/{packet.log_count}] Received from {device_id}")
-    print(f"  Level: {packet.log['device_level']}")
-    print(f"  Message: {packet.log['device_message']}")
-    print(
-        f"  Temp: {packet.log['sensor_temp_c']:.1f}°C, "
-        f"Humidity: {packet.log['sensor_humidity']:.1f}%"
+    similar_cases = find_similar_cases(
+        srv.rag,
+        error_log.get("maude_error_code") or error_log.get("device_event_code"),
+        device_id,
+        temps,
+        humidities,
+        top_k=3,
     )
 
-    # If we've received all logs for this episode
-    expected = packet.log_count
-    if len(active_sessions[device_id]) >= expected:
-        print("\n" + "=" * 70)
-        print("ALL LOGS RECEIVED - STARTING ANALYSIS")
-        print("=" * 70)
+    if similar_cases:
+        print(f"\nFound {len(similar_cases)} similar cases:")
+        for case in similar_cases:
+            print(f"  • {case['error_code']} (similarity: {case['similarity']:.1%})")
 
-        all_logs = active_sessions[device_id][:expected]
-        error_log = all_logs[2]
+    diagnosis = await analyze_with_rag_fewshot(srv, all_logs)
 
-        temps = [log["sensor_temp_c"] for log in all_logs]
-        humidities = [log["sensor_humidity"] for log in all_logs]
+    print("\n" + "=" * 70)
+    print("DIAGNOSIS COMPLETE")
+    print("=" * 70)
 
-        similar_cases = find_similar_cases(
-            error_log.get("maude_error_code") or error_log.get("device_event_code"),
-            device_id,
-            temps,
-            humidities,
-            top_k=3,
+    filename = save_diagnostic_report(srv, all_logs, diagnosis, similar_cases)
+    print(f"✓ Report saved: {filename}\n")
+
+    return {
+        "status": "complete",
+        "diagnosis": diagnosis,
+        "report_file": filename,
+        "model": "RAG + Few-Shot (BioBERT + GPT)",
+        "similar_cases_used": len(similar_cases),
+        "similar_cases": similar_cases,
+        "approach": "hybrid_rag_fewshot",
+    }
+
+
+def create_app(state: ServerState) -> FastAPI:
+    app = FastAPI(title="Medical Device Diagnostic - RAG + Few-Shot")
+    app.state.server_state = state
+
+    @app.post("/api/ingest")
+    async def ingest_log_raw(request: Request):
+        """
+        Raw ingest endpoint that:
+        - Reads the body as text.
+        - Tries json.loads.
+        - If it fails at end-of-input, appends '}' once and retries.
+        - Then validates against SingleLogPacket and runs existing logic.
+        """
+        srv: ServerState = request.app.state.server_state
+
+        raw = await request.body()
+        try:
+            raw_text = raw.decode("utf-8")
+        except Exception:
+            raw_text = raw.decode("utf-8", errors="replace")
+
+        payload_dict: Optional[dict] = None
+        try:
+            payload_dict = json.loads(raw_text)
+        except JSONDecodeError as e:
+            if e.pos >= len(raw_text) - 1:
+                fixed_text = raw_text + "}"
+                try:
+                    payload_dict = json.loads(fixed_text)
+                    print("[INGEST] JSON parsed after appending '}'")
+                except Exception as e2:
+                    print(f"[INGEST] Still could not parse JSON after fix: {e2}")
+                    raise
+            else:
+                print(f"[INGEST] JSON decode error (no fix attempted): {e}")
+                raise
+
+        packet = SingleLogPacket(**payload_dict)
+        device_id = packet.log["device_id"]
+
+        if device_id not in srv.active_sessions:
+            srv.active_sessions[device_id] = []
+            print(f"\n[SESSION] Started new session for device: {device_id}")
+
+        srv.active_sessions[device_id].append(packet.log)
+
+        print(f"[LOG {packet.log_index}/{packet.log_count}] Received from {device_id}")
+        print(f"  Level: {packet.log['device_level']}")
+        print(f"  Message: {packet.log['device_message']}")
+        print(
+            f"  Temp: {packet.log['sensor_temp_c']:.1f}°C, "
+            f"Humidity: {packet.log['sensor_humidity']:.1f}%"
         )
 
-        if similar_cases:
-            print(f"\nFound {len(similar_cases)} similar cases:")
-            for case in similar_cases:
-                print(
-                    f"  • {case['error_code']} (similarity: {case['similarity']:.1%})"
-                )
+        expected = packet.log_count
+        if len(srv.active_sessions[device_id]) >= expected:
+            logs = srv.active_sessions.pop(device_id)
+            asyncio.create_task(process_log_sequence(state, logs[:expected]))
+            return {
+                "status": "queued",
+                "received": expected,
+                "device_id": device_id,
+                "message": "Log sequence complete; analysis running in background",
+            }
+        else:
+            return {
+                "status": "buffering",
+                "received": len(srv.active_sessions[device_id]),
+                "waiting_for": expected,
+                "device_id": device_id,
+            }
 
-        diagnosis = await analyze_with_rag_fewshot(all_logs)
-
-        print("\n" + "=" * 70)
-        print("DIAGNOSIS COMPLETE")
-        print("=" * 70)
-
-        filename = save_diagnostic_report(all_logs, diagnosis, similar_cases)
-        print(f"✓ Report saved: {filename}\n")
-
-        del active_sessions[device_id]
-
+    @app.get("/")
+    def root() -> Dict[str, Any]:
+        srv: ServerState = app.state.server_state
         return {
-            "status": "complete",
-            "diagnosis": diagnosis,
-            "report_file": filename,
-            "model": "RAG + Few-Shot (BioBERT + GPT)",
-            "similar_cases_used": len(similar_cases),
-            "similar_cases": similar_cases,
-            "approach": "hybrid_rag_fewshot",
-        }
-    else:
-        return {
-            "status": "buffering",
-            "received": len(active_sessions[device_id]),
-            "waiting_for": expected,
-            "device_id": device_id,
+            "service": "Medical Device Diagnostic - RAG + Few-Shot",
+            "model": "BioBERT (RAG) + GPT (Few-Shot)",
+            "training_samples": len(srv.rag.training_data)
+            if srv.rag.has_training_data
+            else 0,
+            "active_sessions": len(srv.active_sessions),
+            "status": "operational",
         }
 
+    @app.get("/health")
+    def health_check() -> Dict[str, Any]:
+        srv: ServerState = app.state.server_state
+        return {
+            "status": "healthy",
+            "approach": "RAG + Few-Shot",
+            "active_sessions": len(srv.active_sessions),
+        }
 
-@app.get("/")
-def root():
-    return {
-        "service": "Medical Device Diagnostic - RAG + Few-Shot",
-        "model": "BioBERT (RAG) + GPT (Few-Shot)",
-        "training_samples": len(training_data) if HAS_TRAINING_DATA else 0,
-        "active_sessions": len(active_sessions),
-        "status": "operational",
-    }
+    @app.get("/sessions")
+    def list_sessions() -> Dict[str, Any]:
+        srv: ServerState = app.state.server_state
+        return {
+            "active_sessions": list(srv.active_sessions.keys()),
+            "session_details": {
+                device_id: {"logs_received": len(logs)}
+                for device_id, logs in srv.active_sessions.items()
+            },
+        }
 
-
-@app.get("/health")
-def health_check():
-    return {
-        "status": "healthy",
-        "approach": "RAG + Few-Shot",
-        "active_sessions": len(active_sessions),
-    }
-
-
-@app.get("/sessions")
-def list_sessions():
-    return {
-        "active_sessions": list(active_sessions.keys()),
-        "session_details": {
-            device_id: {"logs_received": len(logs)}
-            for device_id, logs in active_sessions.items()
-        },
-    }
+    return app
 
 
 # ==============================================================================
-# MAIN
+# MAIN / CLI
 # ==============================================================================
 
-if __name__ == "__main__":
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Medical Device Diagnostic LLM Server (RAG + Few-Shot)"
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Host interface to bind (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8001,
+        help="Port to listen on (default: 8001)",
+    )
+    parser.add_argument(
+        "--reports-path",
+        type=str,
+        default="./reports/",
+        help="Directory to write diagnostic reports (default: ./reports/)",
+    )
+    parser.add_argument(
+        "--training-data-path",
+        type=str,
+        default="medical_device_training_with_humidity.jsonl",
+        help="Path to training data JSONL",
+    )
+    parser.add_argument(
+        "--biobert-model-name",
+        type=str,
+        default="dmis-lab/biobert-base-cased-v1.1",
+        help="Hugging Face model name for BioBERT",
+    )
+    parser.add_argument(
+        "--llm-model",
+        type=str,
+        default="GPT-4.1-Mini",
+        help="Poe LLM model name",
+    )
+    parser.add_argument(
+        "--poe-api-key",
+        type=str,
+        default="aA_SPfposL5Zgrm3qft9ufaalxrjpkZdvElonE2lG4w",
+        help="Poe API key",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    config = AppConfig(
+        poe_api_key=args.poe_api_key,
+        llm_model=args.llm_model,
+        biobert_model_name=args.biobert_model_name,
+        training_data_path=args.training_data_path,
+        reports_path=args.reports_path,
+    )
+
+    rag_state = init_rag_state(config)
+    server_state = ServerState(config=config, rag=rag_state)
+    app = create_app(server_state)
+
     print("\n" + "=" * 70)
     print("Medical Device Diagnostic Server - RAG + Few-Shot")
     print("Updated Schema: Sequential Log Ingestion (per-log)")
     print("=" * 70)
-    print(f"\nLLM Model: {LLM_MODEL}")
-    print(f"BioBERT Model: {MODEL_NAME}")
-    print(f"Training Data: {TRAINING_DATA_PATH}")
-    print(f"Training Samples: {len(training_data) if HAS_TRAINING_DATA else 0}")
+    print(f"\nLLM Model: {config.llm_model}")
+    print(f"BioBERT Model: {config.biobert_model_name}")
+    print(f"Training Data: {config.training_data_path}")
+    print(
+        f"Training Samples: {len(rag_state.training_data) if rag_state.has_training_data else 0}"
+    )
+    print(f"Reports Path: {config.reports_path}")
     print("\nEndpoints:")
     print("  POST /api/ingest   - Receive individual logs from ESP32")
     print("  GET  /             - Server info")
     print("  GET  /health       - Health check")
     print("  GET  /sessions     - Active sessions debug info")
-    print("\nStarting server on http://0.0.0.0:8001")
+    print(f"\nStarting server on http://{args.host}:{args.port}")
     print("=" * 70 + "\n")
 
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()
