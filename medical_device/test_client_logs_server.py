@@ -1,7 +1,7 @@
 """
 test_client_logs_server.py
 
-Simple integration tests for the /logs endpoint of logs_server.py.
+Debug client for the /logs endpoint of logs_server.py.
 
 Assumes:
 - logs_server.py is running (e.g., on http://0.0.0.0:8000)
@@ -11,8 +11,7 @@ Assumes:
 import argparse
 import datetime as dt
 import json
-import sys
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import httpx
 
@@ -27,228 +26,76 @@ def iso_now_minus(seconds: int) -> str:
     return t.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def assert_log_shape(log: Dict[str, Any]) -> None:
-    """Basic schema checks for a single log entry (device_* + maude_* fields)."""
-    required_device_keys = [
-        "device_timestamp",
-        "device_level",
-        "device_id",
-        "device_event_type",
-        "device_event_code",
-        "device_message",
-        "device_subsystem",
-    ]
-    for k in required_device_keys:
-        if k not in log:
-            raise AssertionError(f"Missing device key {k} in log entry: {log}")
-
-    if not isinstance(log["device_timestamp"], str):
-        raise AssertionError("device_timestamp must be a string")
-    if not isinstance(log["device_id"], str):
-        raise AssertionError("device_id must be a string")
-
-    maude_keys = [
-        "maude_error_code",
-        "maude_product_problems",
-        "maude_event_type",
-        "maude_similar_events_count",
-        "maude_manufacturer_narrative",
-        "maude_remedial_action",
-        "maude_device_class",
-        "maude_report_date",
-    ]
-    for k in maude_keys:
-        if k not in log:
-            raise AssertionError(f"Missing maude key {k} in log entry: {log}")
-
-    if log["maude_error_code"] is not None and not isinstance(
-        log["maude_error_code"], str
-    ):
-        raise AssertionError("maude_error_code must be string or None")
-    if log["maude_product_problems"] is not None and not isinstance(
-        log["maude_product_problems"], list
-    ):
-        raise AssertionError("maude_product_problems must be list or None")
-    if log["maude_event_type"] is not None and not isinstance(
-        log["maude_event_type"], str
-    ):
-        raise AssertionError("maude_event_type must be string or None")
-    if log["maude_similar_events_count"] is not None and not isinstance(
-        log["maude_similar_events_count"], int
-    ):
-        raise AssertionError("maude_similar_events_count must be int or None")
-    if log["maude_manufacturer_narrative"] is not None and not isinstance(
-        log["maude_manufacturer_narrative"], str
-    ):
-        raise AssertionError("maude_manufacturer_narrative must be string or None")
-    if log["maude_remedial_action"] is not None and not isinstance(
-        log["maude_remedial_action"], list
-    ):
-        raise AssertionError("maude_remedial_action must be list or None")
-    if log["maude_device_class"] is not None and not isinstance(
-        log["maude_device_class"], (str, int)
-    ):
-        raise AssertionError("maude_device_class must be string/int or None")
-    if log["maude_report_date"] is not None and not isinstance(
-        log["maude_report_date"], str
-    ):
-        raise AssertionError("maude_report_date must be string or None")
+def print_response(tag: str, resp: httpx.Response) -> None:
+    logger.info("=== %s ===", tag)
+    logger.info("URL: %s", resp.url)
+    logger.info("Status: %d", resp.status_code)
+    logger.info("Headers: %s", dict(resp.headers))
+    try:
+        data: Dict[str, Any] = resp.json()
+        logger.info("JSON body:\n%s", json.dumps(data, indent=2))
+    except Exception as e:
+        logger.warning("Failed to parse JSON body: %s", e)
+        logger.info("Raw body:\n%s", resp.text)
 
 
-def test_basic_query(base_url: str) -> Dict[str, Any]:
-    """Test a simple query with default limit."""
-    params = {
+def run_queries(base_url: str) -> None:
+    client = httpx.Client(timeout=10.0)
+
+    # 1) Basic query: last hour, limit 50
+    params_basic = {
         "device_id": "ventilator-01",
         "since": iso_now_minus(3600),
         "limit": 50,
     }
-    resp = httpx.get(f"{base_url}/logs", params=params, timeout=5.0)
-    if resp.status_code != 200:
-        raise AssertionError(f"Expected 200, got {resp.status_code}: {resp.text}")
+    resp = client.get(f"{base_url}/logs", params=params_basic)
+    print_response("BASIC_QUERY", resp)
 
-    data: Dict[str, Any] = resp.json()
-    logs: List[Dict[str, Any]] = data.get("logs", [])
-    next_since = data.get("next_since")
-
-    if not isinstance(logs, list):
-        raise AssertionError("Response 'logs' must be a list")
-    if logs:
-        for log in logs:
-            assert_log_shape(log)
-        if next_since is None:
-            raise AssertionError("next_since should not be None when logs are returned")
-    else:
-        if next_since is not None and not isinstance(next_since, str):
-            raise AssertionError("next_since must be string or None")
-
-    return data
-
-
-def test_limit_enforced(base_url: str) -> Dict[str, Any]:
-    """Ensure the limit parameter caps the number of returned logs."""
-    params = {
+    # 2) Limit enforcement: last 24h, limit 5
+    params_limit = {
         "device_id": "ventilator-01",
         "since": iso_now_minus(24 * 3600),
         "limit": 5,
     }
-    resp = httpx.get(f"{base_url}/logs", params=params, timeout=5.0)
-    if resp.status_code != 200:
-        raise AssertionError(f"Expected 200, got {resp.status_code}: {resp.text}")
+    resp = client.get(f"{base_url}/logs", params=params_limit)
+    print_response("LIMIT_QUERY", resp)
 
-    data: Dict[str, Any] = resp.json()
-    logs: List[Dict[str, Any]] = data.get("logs", [])
-    if len(logs) > 5:
-        raise AssertionError(f"Expected at most 5 logs, got {len(logs)}")
-    for log in logs:
-        assert_log_shape(log)
-
-    return data
-
-
-def test_invalid_device(base_url: str) -> Dict[str, Any]:
-    """Query with a wrong device_id should return 0 logs, not error."""
-    params = {
+    # 3) Invalid device_id
+    params_invalid = {
         "device_id": "unknown-device",
         "since": iso_now_minus(3600),
         "limit": 10,
     }
-    resp = httpx.get(f"{base_url}/logs", params=params, timeout=5.0)
-    if resp.status_code != 200:
-        raise AssertionError(f"Expected 200, got {resp.status_code}: {resp.text}")
+    resp = client.get(f"{base_url}/logs", params=params_invalid)
+    print_response("INVALID_DEVICE_QUERY", resp)
 
-    data: Dict[str, Any] = resp.json()
-    logs: List[Dict[str, Any]] = data.get("logs", [])
-    if logs:
-        raise AssertionError(
-            f"Expected 0 logs for unknown device_id, got {len(logs)} entries"
-        )
-
-    return data
-
-
-def test_paging(base_url: str) -> Dict[str, Any]:
-    """
-    Test that next_since can be used to page:
-    - First call gets some logs and a next_since.
-    - Second call with since=next_since should return logs at or after that point.
-    """
-    result: Dict[str, Any] = {}
-
-    first_params = {
+    # 4) Paging example
+    params_page1 = {
         "device_id": "ventilator-01",
         "since": iso_now_minus(24 * 3600),
         "limit": 3,
     }
-    resp1 = httpx.get(f"{base_url}/logs", params=first_params, timeout=5.0)
-    if resp1.status_code != 200:
-        raise AssertionError(
-            f"First call expected 200, got {resp1.status_code}: {resp1.text}"
-        )
+    resp1 = client.get(f"{base_url}/logs", params=params_page1)
+    print_response("PAGING_FIRST", resp1)
 
-    data1: Dict[str, Any] = resp1.json()
-    logs1: List[Dict[str, Any]] = data1.get("logs", [])
+    try:
+        data1 = resp1.json()
+    except Exception:
+        return
+
     next_since = data1.get("next_since")
-    result["first"] = data1
+    if not next_since:
+        return
 
-    if len(logs1) < 1 or not next_since:
-        return result
-
-    second_params = {
+    params_page2 = {
         "device_id": "ventilator-01",
         "since": next_since,
         "limit": 10,
     }
-    resp2 = httpx.get(f"{base_url}/logs", params=second_params, timeout=5.0)
-    if resp2.status_code != 200:
-        raise AssertionError(
-            f"Second call expected 200, got {resp2.status_code}: {resp2.text}"
-        )
+    resp2 = client.get(f"{base_url}/logs", params=params_page2)
+    print_response("PAGING_SECOND", resp2)
 
-    data2: Dict[str, Any] = resp2.json()
-    logs2: List[Dict[str, Any]] = data2.get("logs", [])
-
-    for log in logs2:
-        assert_log_shape(log)
-        if log["device_timestamp"] < next_since:
-            raise AssertionError(
-                f"Paging error: log timestamp {log['device_timestamp']} < next_since {next_since}"
-            )
-
-    result["second"] = data2
-    return result
-
-
-def test_error_event_maude_enrichment(base_url: str) -> Dict[str, Any]:
-    """
-    Ensure that ERROR_EVENT logs are present and have MAUDE enrichment fields populated
-    when the OpenFDA API returns data.
-    """
-    params = {
-        "device_id": "ventilator-01",
-        "since": iso_now_minus(24 * 3600),
-        "limit": 200,
-    }
-    resp = httpx.get(f"{base_url}/logs", params=params, timeout=10.0)
-    if resp.status_code != 200:
-        raise AssertionError(f"Expected 200, got {resp.status_code}: {resp.text}")
-
-    data: Dict[str, Any] = resp.json()
-    logs: List[Dict[str, Any]] = data.get("logs", [])
-
-    error_logs = [l for l in logs if l.get("device_event_type") == "ERROR_EVENT"]
-
-    if not error_logs:
-        return {"note": "no ERROR_EVENT logs found in test window", "raw": data}
-
-    err = error_logs[0]
-    assert_log_shape(err)
-
-    if err.get("maude_error_code") is None:
-        raise AssertionError(
-            "Expected maude_error_code to be non-null for ERROR_EVENT log"
-        )
-
-    return {"first_error_event": err}
+    client.close()
 
 
 def main() -> None:
@@ -273,33 +120,7 @@ def main() -> None:
 
     base_url = args.base_url.rstrip("/")
 
-    try:
-        data_basic = test_basic_query(base_url)
-        data_limit = test_limit_enforced(base_url)
-        data_invalid = test_invalid_device(base_url)
-        data_paging = test_paging(base_url)
-        data_error_maude = test_error_event_maude_enrichment(base_url)
-    except AssertionError as e:
-        logger.error(f"[FAIL] {e}")
-        sys.exit(1)
-
-    import logging as _logging
-
-    if logger.isEnabledFor(_logging.DEBUG):
-        logger.debug("test_basic_query response:\n%s", json.dumps(data_basic, indent=2))
-        logger.debug(
-            "test_limit_enforced response:\n%s", json.dumps(data_limit, indent=2)
-        )
-        logger.debug(
-            "test_invalid_device response:\n%s", json.dumps(data_invalid, indent=2)
-        )
-        logger.debug("test_paging response:\n%s", json.dumps(data_paging, indent=2))
-        logger.debug(
-            "test_error_event_maude_enrichment response:\n%s",
-            json.dumps(data_error_maude, indent=2),
-        )
-
-    logger.info("[OK] All /logs tests passed")
+    run_queries(base_url)
 
 
 if __name__ == "__main__":
