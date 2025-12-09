@@ -12,14 +12,13 @@ Responsibilities:
   and POST EACH ENRICHED LOG INDIVIDUALLY to the LLM server.
 """
 
+import gc
 import network
-import ntptime
 import time
 import urequests
 import ujson
-import gc
 
-from machine import Pin, I2C
+from machine import Pin, I2C, RTC
 
 import ssd1306
 import config
@@ -45,7 +44,7 @@ POST_ERROR_LOGS = 2
 POLL_DELAY = 1.5  # Seconds between checks
 
 # ------------------------------------------------------------------------------
-# 2. HARDWARE SETUP (OLED + Si7021 Temperature Sensor)
+# 2. HARDWARE SETUP (MCU + OLED + Si7021 Temperature Sensor)
 # ------------------------------------------------------------------------------
 MAX_DISPLAY_CHARS = 16  # 128 pixels / 8 px per char
 LINE_HEIGHT = 8  # 8 px per text row
@@ -56,12 +55,17 @@ time.sleep(0.1)
 
 i2c = I2C(sda=Pin(22), scl=Pin(20))
 
+wifi_connected = False
+
+# Real-Time Clock (will be set from internet)
+rtc = RTC()
+
 try:
     oled = ssd1306.SSD1306_I2C(128, 32, i2c)
     HAS_SCREEN = True
-except:
+except Exception as e:
     HAS_SCREEN = False
-    print("[WARN] OLED not found")
+    print(f"[WARN] OLED not found: {e}")
 
 try:
     temp_sensor = Si7021(i2c)
@@ -129,13 +133,120 @@ def write_lines_to_display(line1=None, line2=None, line3=None, line4=None):
 # ------------------------------------------------------------------------------
 # 3. HELPERS
 # ------------------------------------------------------------------------------
-def sync_clock():
-    print("[TIME] Syncing NTP...")
+class WiFiError(Exception):
+    """Exception raised when WiFi connection fails"""
+
+    pass
+
+
+class APIError(Exception):
+    """Base exception for API-related errors"""
+
+    pass
+
+
+class GeolocationError(APIError):
+    """Exception raised when geolocation API fails"""
+
+    pass
+
+
+class TimeError(APIError):
+    """Exception raised when time sync fails"""
+
+    pass
+
+
+def fetch_geolocation():
+    """Fetch geolocation data from API. Raises GeolocationError on failure."""
+    global latitude, longitude, city, country, timezone
+
+    if not wifi_connected:
+        raise GeolocationError("WiFi not connected")
+
     try:
-        ntptime.settime()
-        print("[TIME] Synced!")
-    except:
-        print("[TIME] Failed (Will use relative time)")
+        print(f"[GEO] Fetching location from {config.GEO_API_URL}...")
+        response = urequests.get(config.GEO_API_URL, timeout=10)
+
+        if response.status_code == 200:
+            data = ujson.loads(response.text)
+
+            latitude = data.get("lat", 0.0)
+            longitude = data.get("lon", 0.0)
+            city = data.get("city", "Unknown")
+            country = data.get("country", "Unknown")
+            timezone = data.get("timezone", "America/New_York")  # Get timezone
+
+            print(f"[GEO] Location: {city}, {country}")
+            print(f"[GEO] Coordinates: {latitude}, {longitude}")
+            print(f"[GEO] Timezone: {timezone}")
+
+            response.close()
+            return True
+        else:
+            response.close()
+            raise GeolocationError(
+                f"Geolocation API returned status code {response.status_code}"
+            )
+
+    except Exception as e:
+        if isinstance(e, GeolocationError):
+            raise
+        raise GeolocationError(f"Failed to fetch geolocation: {str(e)}")
+
+
+def sync_time_from_internet() -> str:
+    """Sync RTC with internet time based on timezone. Raises TimeError on failure."""
+    if not wifi_connected:
+        raise TimeError("WiFi not connected")
+
+    # First get timezone from geolocation
+    try:
+        fetch_geolocation()
+    except GeolocationError as e:
+        raise TimeError(f"Cannot get timezone: {str(e)}")
+
+    # Now fetch time for that timezone
+    try:
+        url = f"{config.TIME_API_URL}/{timezone}"
+        print(f"[TIME] Fetching time from {url}...")
+
+        response = urequests.get(url, timeout=10)
+
+        if response.status_code == 200:
+            data = ujson.loads(response.text)
+
+            # Example datetime format: "2025-10-22T15:48:23.123456-04:00"
+            datetime_str = data.get("datetime", "")
+
+            # Parse the datetime string
+            # Format: YYYY-MM-DDTHH:MM:SS.ffffff±HH:MM
+            date_part, time_part = datetime_str.split("T")
+            year, month, day = map(int, date_part.split("-"))
+
+            # Remove timezone offset and microseconds
+            time_only = time_part.split(".")[0]  # Remove microseconds
+            hour, minute, second = map(int, time_only.split(":"))
+
+            # Get day of week (0 = Monday, 6 = Sunday)
+            day_of_week = data.get("day_of_week", 0)
+
+            # Set RTC: (year, month, day, day_of_week, hour, minute, second, microsecond)
+            rtc.init((year, month, day, day_of_week, hour, minute, second, 0))
+
+            year, month, day, hour, min, sec, msec, tz = rtc.datetime()
+            curr_time = f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{min:02d}:{sec:02d}.{msec:03d}Z"
+            print(f"[TIME] RTC set to: {curr_time}")
+            response.close()
+            return curr_time
+        else:
+            response.close()
+            raise TimeError(f"Time API returned status code {response.status_code}")
+
+    except Exception as e:
+        if isinstance(e, TimeError):
+            raise
+        raise TimeError(f"Failed to sync time: {str(e)}")
 
 
 def parse_iso_simple(iso_str):
@@ -153,7 +264,7 @@ def parse_iso_simple(iso_str):
             0,
         )
         return time.mktime(t_tuple)
-    except:
+    except Exception:
         return 0
 
 
@@ -161,21 +272,36 @@ def parse_iso_simple(iso_str):
 # 4. NETWORK LOGIC
 # ------------------------------------------------------------------------------
 def connect_wifi():
+    """Connect to WiFi network. Raises WiFiError if connection fails."""
+    global wifi_connected
+
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
+
     if not wlan.isconnected():
-        print(f"Connecting to {WIFI_SSID}...")
-        wlan.connect(WIFI_SSID, WIFI_PASS)
-        timeout = 20
-        while not wlan.isconnected() and timeout > 0:
+        print(f"[WiFi] Connecting to {WIFI_SSID}...")
+        wlan.connect(config.WIFI_SSID, config.WIFI_PASS)
+
+        # Wait for connection
+        timeout = 0
+        while not wlan.isconnected() and timeout < 10:
             time.sleep(1)
-            timeout -= 1
+            timeout += 1
             print(".", end="")
 
-    if wlan.isconnected():
-        print(f"\n[WiFi] IP: {wlan.ifconfig()[0]}")
-        return True
-    return False
+        print()
+
+        if wlan.isconnected():
+            wifi_connected = True
+            print(f"[WiFi] Connected! IP: {wlan.ifconfig()[0]}")
+        else:
+            wifi_connected = False
+            raise WiFiError(f"Failed to connect to WiFi network '{WIFI_SSID}'")
+    else:
+        wifi_connected = True
+        print(f"[WiFi] Already connected. IP: {wlan.ifconfig()[0]}")
+
+    return wifi_connected
 
 
 def fetch_logs(current_since):
@@ -218,9 +344,6 @@ def find_closest_sensor_sample(log_timestamp_iso, sensor_readings_history):
 
 
 def send_single_log_to_llm(log_entry, index, total):
-    """
-    Send a single enriched log entry to the LLM server.
-    """
     index += 1
     print(f"\n[POST] Sending log {index}/{total} to LLM server...")
     write_lines_to_display(
@@ -230,6 +353,7 @@ def send_single_log_to_llm(log_entry, index, total):
     )
 
     payload = {
+        "context": "Temperature and Humidity Event from Si7021 Sensor",
         "log_index": index,
         "log_count": total,
         "log": log_entry,
@@ -241,6 +365,15 @@ def send_single_log_to_llm(log_entry, index, total):
         gc.collect()
         body = ujson.dumps(payload)
         print(f"[POST] Payload length: {len(body)} bytes")
+
+        # Validate JSON locally on the MCU
+        try:
+            _ = ujson.loads(body)
+            print("[POST] ujson.loads(payload) OK")
+        except Exception as e:
+            print("[POST] ujson.loads(payload) FAILED:", e)
+            return False
+
     except Exception as e:
         print(f"[POST] JSON encode error: {e}")
         return False
@@ -259,9 +392,31 @@ def send_single_log_to_llm(log_entry, index, total):
 # 5. MAIN LOOP
 # ------------------------------------------------------------------------------
 def main():
-    if not connect_wifi():
+    time_synced = False
+
+    # Connect to WiFi
+    try:
+        connect_wifi()
+    except WiFiError as e:
+        print(f"[ERR] {e}")
+        print("[ERR] Failed WiFi connection")
+        # Do NOT sys.exit() – just return so the loop never starts
         return
-    sync_clock()
+
+    # Sync time from internet
+    try:
+        print("\n[INIT] Syncing time from internet...")
+        cursor_since = sync_time_from_internet()
+        print("[INIT] Time sync successful!")
+        time_synced = True
+    except (TimeError, GeolocationError) as e:
+        print(f"[ERR] Time sync failed: {e}")
+        # Again, just return; no time, no main loop
+        return
+
+    if not time_synced:
+        print("[INIT] Time not synced; skipping main loop.")
+        return
 
     print("[I2C] Scanning bus...")
     devices = i2c.scan()
@@ -273,10 +428,9 @@ def main():
     state = "MONITORING"
     logs_needed_after_error = 0
 
-    cursor_since = "2024-01-01T00:00:00.000Z"
+    print("[SYS] System Online. Reading REAL temperature from Si7021.")
 
-    print("System Online. Reading REAL temperature from Si7021.")
-
+    # Main loop will only be reached if time was successfully synced
     while True:
         # A. READ SENSOR
         current_temp = read_temperature()
@@ -303,7 +457,6 @@ def main():
                 if len(log_buffer) > PRE_ERROR_LOGS + 1:
                     log_buffer.pop(0)
 
-                # Trigger on device-level error events
                 if log.get("device_event_type") == "ERROR_EVENT":
                     print("!!! ERROR DETECTED !!!")
                     state = "COLLECTING_POST_ERROR"
@@ -318,7 +471,6 @@ def main():
                 )
 
                 if logs_needed_after_error <= 0:
-                    # Enrich each log with closest sensor reading and send individually
                     total = len(log_buffer)
                     for idx, base_log in enumerate(log_buffer):
                         enriched = dict(base_log)
@@ -335,7 +487,6 @@ def main():
                     state = "MONITORING"
                     write_lines_to_display(("Sent!", "left"), ("Monitoring...", "left"))
 
-        # Display Current Status
         if state == "MONITORING":
             write_lines_to_display(
                 ("Monitoring...", "left"),
