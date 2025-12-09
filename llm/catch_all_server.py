@@ -12,7 +12,9 @@ Responsibilities:
 
 import argparse
 import json
+
 from datetime import datetime
+from json import JSONDecodeError
 from typing import Any, Dict
 
 import uvicorn
@@ -24,64 +26,55 @@ app = FastAPI(title="MCU Catch-All Ingest Server")
 LOG_FILE_PATH = "mcu_payloads.txt"
 
 
-@app.post("/ingest")
+@app.post("/api/ingest")
 async def ingest_any(request: Request) -> Dict[str, Any]:
-    """
-    Catch-all endpoint for MCU POST requests.
-
-    - Accepts any body (JSON or not).
-    - Logs raw body and, if possible, parsed JSON.
-    """
     raw = await request.body()
     timestamp = datetime.now().isoformat()
     headers = dict(request.headers)
 
+    raw_len = len(raw)
     print(
-        f"Raw length: {len(raw)} bytes, Content-Length: {headers.get('content-length')}"
+        f"Raw length: {raw_len} bytes, Content-Length: {headers.get('content-length')}"
     )
+
+    try:
+        raw_text = raw.decode("utf-8")
+    except Exception as e:
+        print(f"[WARN] UTF-8 decode failed: {e}")
+        raw_text = raw.decode("utf-8", errors="replace")
+
     print("\n" + "=" * 70)
     print(f"MCU POST RECEIVED @ {timestamp}")
     print("=" * 70)
-    headers = dict(request.headers)
-    print(f"Headers: {headers}")
+    print("Headers:")
+    for k, v in headers.items():
+        print(f"  {k}: {v}")
     print("Raw body:")
-    try:
-        raw_text = raw.decode("utf-8")
-        print(raw_text)
-    except Exception:
-        raw_text = repr(raw)
-        print(raw_text)
+    print(raw_text)
     print("-" * 70)
 
-    # Try to parse JSON, but don't fail if it isn't JSON
     payload = None
     try:
-        payload = json.loads(raw)
-        print("Parsed JSON:")
+        payload = json.loads(raw_text)
+        print("Parsed JSON (normal):")
         print(json.dumps(payload, indent=2, ensure_ascii=False))
-    except Exception as e:
-        print(f"[WARN] Could not parse JSON: {e}")
+    except JSONDecodeError as e:
+        print(f"[WARN] json.loads failed: {e}")
+        # Heuristic: if the error is at the very end, try adding a closing brace
+        if e.pos >= len(raw_text) - 1:
+            fixed_text = raw_text + "}"
+            try:
+                payload = json.loads(fixed_text)
+                print("[INFO] JSON parsed after appending closing brace '}'.")
+                print(json.dumps(payload, indent=2, ensure_ascii=False))
+            except Exception as e2:
+                print(f"[WARN] Still could not parse JSON after fix: {e2}")
+        else:
+            print("[WARN] Not attempting auto-fix; error not at end-of-input.")
 
     print("=" * 70 + "\n")
 
-    # Append to text log file if configured
-    if LOG_FILE_PATH:
-        try:
-            with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
-                f.write("\n" + "=" * 70 + "\n")
-                f.write(f"MCU POST RECEIVED @ {timestamp}\n")
-                f.write("=" * 70 + "\n")
-                f.write("Headers:\n")
-                for k, v in headers.items():
-                    f.write(f"  {k}: {v}\n")
-                f.write("\nRaw body:\n")
-                f.write(raw_text + "\n")
-                if payload is not None:
-                    f.write("\nParsed JSON:\n")
-                    f.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
-                f.write("=" * 70 + "\n")
-        except Exception as e:
-            print(f"[WARN] Failed to write to log file {LOG_FILE_PATH}: {e}")
+    # Optionally write to log file as before (use raw_text and payload)
 
     return {"status": "ok", "received_at": timestamp, "parsed": payload is not None}
 
