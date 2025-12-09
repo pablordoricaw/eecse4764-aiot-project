@@ -12,7 +12,6 @@ Responsibilities:
 
 import argparse
 import json
-
 from datetime import datetime
 from json import JSONDecodeError
 from typing import Any, Dict
@@ -72,9 +71,26 @@ async def ingest_any(request: Request) -> Dict[str, Any]:
         else:
             print("[WARN] Not attempting auto-fix; error not at end-of-input.")
 
-    print("=" * 70 + "\n")
+    # Append to log file (create if it does not exist)
+    try:
+        with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
+            f.write("=" * 70 + "\n")
+            f.write(f"MCU POST RECEIVED @ {timestamp}\n")
+            f.write("=" * 70 + "\n")
+            f.write("Headers:\n")
+            for k, v in headers.items():
+                f.write(f"  {k}: {v}\n")
+            f.write("Raw body:\n")
+            f.write(raw_text + "\n")
+            if payload is not None:
+                f.write("-" * 70 + "\n")
+                f.write("Parsed JSON:\n")
+                f.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+            f.write("=" * 70 + "\n\n")
+    except Exception as e:
+        print(f"[WARN] Failed to write to log file {log_file_path}: {e}")
 
-    # Optionally write to log file as before (use raw_text and payload)
+    print("=" * 70 + "\n")
 
     return {"status": "ok", "received_at": timestamp, "parsed": payload is not None}
 
@@ -102,10 +118,10 @@ def setup_argparser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--log-file",
-        default="mcu_payloads.txt",
+        default=LOG_FILE_PATH,
         help=(
             "Path to text file where payloads will be appended "
-            '(default: "mcu_payloads.txt" in current directory)'
+            f'(default: "{LOG_FILE_PATH}" in current directory)'
         ),
     )
     return parser
@@ -115,12 +131,13 @@ if __name__ == "__main__":
     parser = setup_argparser()
     args = parser.parse_args()
 
-    LOG_FILE_PATH = args.log_file
+    global logs_file_path
+    log_file_path = args.log_file
 
     print("\n" + "=" * 70)
     print("MCU Catch-All Ingest Server")
     print("=" * 70)
-    print(f"Log file: {LOG_FILE_PATH}")
+    print(f"Log file: {log_file_path}")
     print(f"Starting server on http://{args.host}:{args.port}")
     print("=" * 70 + "\n")
 
