@@ -108,7 +108,7 @@ def extract_maude_fields(
         "maude_product_problems": None,
         "maude_event_type": None,
         "maude_similar_events_count": 0,
-        "maude_manufacturer_narrative": None,
+        # "maude_manufacturer_narrative": None,
         "maude_remedial_action": None,
         "maude_device_class": None,
         "maude_report_date": None,
@@ -142,7 +142,7 @@ def extract_maude_fields(
     # Product problems (array of strings)
     product_problems = first_result.get("product_problems", [])
     if product_problems:
-        maude_fields["maude_product_problems"] = product_problems
+        maude_fields["maude_product_problems"] = product_problems[0]
 
     # Event type (e.g., "Malfunction", "Injury", "Death")
     event_type = first_result.get("event_type")
@@ -152,28 +152,34 @@ def extract_maude_fields(
     # Remedial action taken
     remedial_action = first_result.get("remedial_action", [])
     if remedial_action:
-        maude_fields["maude_remedial_action"] = remedial_action
+        maude_fields["maude_remedial_action"] = remedial_action[0]
 
     # Report date
     report_date = first_result.get("date_received") or first_result.get("date_of_event")
     if report_date:
         maude_fields["maude_report_date"] = report_date
 
+    ####
+    # Commented out to keep message size small enough for MCU client
+    ####
     # MDR text narratives (manufacturer description of event)
-    mdr_text = first_result.get("mdr_text", [])
-    if mdr_text:
-        # Find manufacturer narrative if available
-        for text_entry in mdr_text:
-            text_type = text_entry.get("text_type_code", "")
-            text_content = text_entry.get("text", "")
-            if (
-                text_type
-                in ["Description of Event or Problem", "Manufacturer Narrative"]
-                and text_content
-            ):
-                # Truncate long narratives
-                maude_fields["maude_manufacturer_narrative"] = text_content[:500]
-                break
+    # mdr_text = first_result.get("mdr_text", [])
+    # if mdr_text:
+    #     # Find manufacturer narrative if available
+    #     for text_entry in mdr_text:
+    #         text_type = text_entry.get("text_type_code", "")
+    #         text_content = text_entry.get("text", "")
+    #         if (
+    #             text_type
+    #             in ["Description of Event or Problem", "Manufacturer Narrative"]
+    #             and text_content
+    #         ):
+    #             # Truncate long narratives
+    #             maude_fields["maude_manufacturer_narrative"] = text_content[:500]
+    #             break
+    ####
+    # end
+    ####
 
     # Device class from openfda extension
     devices = first_result.get("device", [])
@@ -209,7 +215,7 @@ def enrich_with_maude(record: Dict[str, Any]) -> Dict[str, Any]:
             "maude_product_problems": None,
             "maude_event_type": None,
             "maude_similar_events_count": None,
-            "maude_manufacturer_narrative": None,
+            # "maude_manufacturer_narrative": None,
             "maude_remedial_action": None,
             "maude_device_class": None,
             "maude_report_date": None,
