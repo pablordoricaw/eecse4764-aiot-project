@@ -75,6 +75,32 @@ And remove specific lab dependencies after you're done working on it:
 uv sync --no-group <subsystem> # Replace <subsystem> with mcu, llm-server, medical-device
 ```
 
+## How to Run Full Project
+
+There are two options to run the project:
+
+1. Manually, which gives the most control  and more tedious.
+2. Automatically, which is less tedious but requires [`tmux`](https://github.com/tmux/tmux/wiki) to be installed.
+
+### Manual
+
+Follow the instructions in the `How to Run` subsection of each subsystem below. It is recommended to run them in the order you encounter them in this README.
+
+### Automatically
+
+> [!IMPORTANT]
+> Again, [`tmux`](https://github.com/tmux/tmux/wiki) is required.
+>
+> You also need to have the MCU subsystem setup (firmware flashed), all hooked up and plugged to your computer. Follow the instructions in the [MCU Subsystem](#mcu-subsystem) section below, then come back.
+
+
+Run the `run.sh` Bash script found in the root of the repository inserting the name of your plugged in microcontroller:
+
+```bash
+chmod +x run.sh
+./run.sh <microcontroller-name>
+```
+
 ## Medical Device Subsystem
 
 The medical device subsystem is made of 3 Python modules:
