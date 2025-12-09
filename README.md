@@ -292,20 +292,20 @@ and look for a device name such as `usbserial-5A6C0422901`.
 Load all the MicroPython files onto the board with:
 
 ```bash
-mpfshell -nc "open /dev/tty.<device-name>; mput *.py"
+mpfshell -nc "open tty.<device-name>; mput *.py"
 ```
 
 > [!TIP]
 > If you change the values in the `config.py` file, you can upload only this file with:
 >
 > ```bash
-> mpfshell -nc "open /dev/tty.<device-name>; mput config.py"
+> mpfshell -nc "open tty.<device-name>; mput config.py"
 > ```
 
 Open a REPL session, so you can see the microcontroller logs.
 
 ```bash
-mpfshell --open /dev/tty.<device-name> -nc repl
+mpfshell --open tty.<device-name> -nc repl
 ```
 
 And finally, hit the Reset button on the microcontroller.
