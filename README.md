@@ -321,7 +321,7 @@ and look for a device name such as `usbserial-5A6C0422901`.
 Load all the MicroPython files onto the board with:
 
 ```bash
-mpfshell -nc "open tty.<device-name>; mput *.py"
+mpfshell -nc "open tty.<device-name>; mput ./*.py"
 ```
 
 > [!TIP]
