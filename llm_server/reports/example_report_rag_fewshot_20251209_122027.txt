@@ -1,0 +1,112 @@
+======================================================================
+MEDICAL DEVICE DIAGNOSTIC REPORT
+Model: RAG + Few-Shot with GPT + BioBERT
+======================================================================
+
+Report Generated: 2025-12-09 12:20:27.711117
+Device ID: ventilator-01
+
+ERROR SUMMARY
+----------------------------------------------------------------------
+Error Code: E-TEMP-HIGH
+Message: Internal ventilator temperature above limit for 33.7 s on breath 35 (70.6 °C)
+Timestamp: 2025-12-09T16:43:29.107812+00:00
+Subsystem: SENSORS
+
+SIMILAR HISTORICAL CASES (RAG)
+----------------------------------------------------------------------
+1. ERROR 1 (similarity: 97.3%)
+   Device: temperature_sensor, Temp: 26.6°C, Humidity: 62.6%
+   Severity: Critical, FDA Code: Communication Failure (COM-788)
+   Root Cause: USB cable disconnection. Contributing factors: Possible environmental interference or component degradation. Confidence level: 80%
+
+2. ERROR 3 (similarity: 97.3%)
+   Device: temperature_sensor, Temp: 16.3°C, Humidity: 82.4%
+   Severity: Medium, FDA Code: Temperature Regulation Failure (TMF-250)
+   Root Cause: Cooling system malfunction causing low operating temperature. Contributing factors: Cold storage or ambient temperature below minimum spec. Confidence level: 84%
+
+3. ERROR 1 (similarity: 97.3%)
+   Device: temperature_sensor, Temp: 25.6°C, Humidity: 64.1%
+   Severity: Medium, FDA Code: Communication Failure (COM-862)
+   Root Cause: USB cable disconnection. Contributing factors: Possible environmental interference or component degradation. Confidence level: 78%
+
+
+======================================================================
+LLM DIAGNOSTIC ANALYSIS
+======================================================================
+
+**Diagnosis for ventilator-01 — Error: E-TEMP-HIGH (Internal temperature 70.6°C for 33.7 s)**
+
+---
+
+### Summary:
+- **Device:** ventilator-01
+- **Error:** Internal ventilator temperature above limit (70.6°C)
+- **Duration:** 33.7 seconds
+- **Room Temperature:** Stable at 18.8°C (within normal 18-28°C)
+- **Room Humidity:** Stable at 30.5% (within normal 30-70%)
+- **Device Normal Internal Temp Range:** ~45°C
+- **Overheating Threshold:** >70°C
+
+---
+
+### Cross-Referencing Device and Room Data:
+
+- Room conditions are stable and well within recommended environmental specs.
+- The internal ventilator temperature (70.6°C) exceeded the overheating threshold significantly.
+- Room temperature is low and stable, ruling out ambient heat as a cause.
+- Humidity is low but within acceptable range; unlikely to cause overheating.
+
+---
+
+### Similar Historical Cases Reference:
+
+- None of the historical cases show overheating at this level; those were communication failures or temperature regulation failures mostly linked to cooling malfunctions or cable issues.
+- This case indicates an internal thermal issue rather than environmental or communication errors.
+
+---
+
+### Probable Root Cause:
+
+**Overheating due to internal component malfunction (e.g., cooling system failure, blocked airflow, fan failure, or heat dissipation issue).**
+
+- Since ambient conditions are normal, the problem is likely mechanical or electronic within the ventilator subsystem responsible for temperature control.
+- Possible causes:
+  - Cooling fan failure or obstruction.
+  - Heat sink detachment or malfunction.
+  - Internal sensor malfunction causing false high temp reading (less likely given duration and severity).
+  - Excessive power draw or hardware fault causing overheating.
+
+---
+
+### Severity and FDA Classification:
+
+- **Severity:** Critical (temperature well above safe operational limits)
+- **FDA Code:** Thermal Hazard (likely TMF - Temperature Monitoring Failure category)
+
+---
+
+### Recommended Troubleshooting Steps:
+
+1. **Immediately stop or pause ventilator use** to prevent patient risk and device damage.
+2. **Inspect cooling components:**
+   - Verify operation of internal cooling fans.
+   - Check for blockages or dust buildup in ventilation pathways.
+3. **Measure internal temperatures manually if possible** to confirm sensor accuracy.
+4. **Check for firmware/software faults** related to temperature control loops.
+5. **Run diagnostic self-tests** if supported by device.
+6. **Contact service technician** for hardware inspection and possible repair/replacement.
+7. **Document all findings and maintain logs** for FDA reporting if required.
+
+---
+
+### Confidence Level: High (90%)
+Based on stable normal ambient conditions and persistent high internal temperature.
+
+---
+
+If you provide further device logs or maintenance history, I can refine this diagnosis.
+
+======================================================================
+END OF REPORT
+======================================================================
