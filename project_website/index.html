@@ -55,12 +55,6 @@
                 <span class="icon fa-th">Results</span>
               </a>
             </li>
-            <li>
-              <a href="#references" id="references-link" class="skel-layers-ignoreHref">
-                <span class="icon fa-th">References</span>
-              </a>
-            </li>
-            <li>
               <a href="#team" id="team-link" class="skel-layers-ignoreHref">
                 <span class="icon fa-user">Our Group</span>
               </a>
@@ -329,28 +323,53 @@
             <h2>Results</h2>
           </header>
 
-          <p align="left">Remember to use figures to help illustrate results.</p>
+          <p align="left">
+            To evaluate the prototype, we defined a small grid of realistic error scenarios that combine
+            different sequences of ventilator log events with different environmental conditions. At the
+            log level, the ventilator simulator can produce five distinct patterns within the error episode
+            window that the MCU monitors:
+          </p>
 
-          <article class="item">
-            <a href="#" class="image fit">
-              <img src="images/pic06.jpg" alt="Results figure placeholder" />
-            </a>
-            <header>
-              <h3>Caption</h3>
-            </header>
-          </article>
+          <ul align="left">
+            <li>Sensor error alone</li>
+            <li>Non‑temperature sensor error followed by internal temperature error</li>
+            <li>Temperature sensor error followed by internal temperature error</li>
+            <li>Internal temperature error followed by non‑temperature sensor error</li>
+            <li>Internal temperature error followed by temperature sensor error</li>
+          </ul>
 
-        </div>
-      </section>
+          <p align="left">
+            For each of these log sequences, the room environment can independently be in one of three
+            regimes for both temperature and humidity: <em>low</em>, <em>normal</em>, or <em>high</em>. In
+            principle this yields a rich matrix of test cases (e.g., internal over‑temperature with high
+            room temperature, sensor error with low humidity, and so on) that can be used to stress‑test
+            how well the system distinguishes between internal device faults and environmental causes.
+            Due to time constraints, we were not able to exhaustively cover all combinations, and a more
+            systematic evaluation of this scenario space is left as future work.
+          </p>
 
-      <section id="references" class="three">
-        <div class="container">
+          <p align="left">
+            One representative test we did complete involved an episode where the ventilator logs reported
+            an internal over‑temperature error (around 70&nbsp;°C for several tens of seconds), while the
+            room temperature and humidity measured by the ESP32 remained stable and well within normal
+            ranges. In this case, the generated diagnostic report correctly emphasized that the ambient
+            environment was normal and identified the problem as an internal ventilator issue, pointing to
+            likely causes such as cooling system failure, blocked airflow, or hardware malfunction, and
+            recommending that the ventilator be taken out of service for inspection. The full report for
+            this scenario is available in the repository:
+            <a href="https://github.com/pablordoricaw/eecse4764-aiot-project/tree/main/llm_server/reports/example_report_rag_fewshot_20251209_122027.txt">
+              example_report_rag_fewshot_20251209_122027.txt
+            </a>.
+          </p>
 
-          <header>
-            <h2>References</h2>
-          </header>
-
-          <p align="left">Blah blah blah</p>
+          <p align="left">
+            Overall, these initial qualitative tests suggest that the combination of room sensor data,
+            log patterns, and retrieval‑augmented prompting allows the system to generate nuanced
+            explanations that differentiate between environmental and internal faults. A more comprehensive
+            quantitative evaluation—sweeping through all defined log/error sequences and temperature/humidity
+            regimes, and comparing the LLM’s classifications against a ground‑truth rubric—would provide a
+            clearer picture of accuracy and robustness, and remains an important direction for future work.
+          </p>
 
         </div>
       </section>
