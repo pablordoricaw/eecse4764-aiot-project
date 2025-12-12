@@ -1954,6 +1954,17 @@
 			background-color: #7eaeac;
 		}
 
+		/* Down-arrow scroll indicator in hero */
+		.down-arrow-link img {
+		  width: 48px;         /* adjust size as needed */
+		  height: auto;
+		  display: inline-block;
+		}
+
+		.down-arrow-link {
+		  border: 0;
+		  padding: 0;
+		}
 /* Item */
 
 	.item {
