@@ -2198,6 +2198,18 @@
 			#main > section.four {
 				background-color: #e8edec;
 			}
+			/* Override section-wide centering for lists inside main content */
+			main section ul,
+			main section ol {
+			  text-align: left;
+			  margin-left: 1.5em;  /* optional: indent bullets a bit */
+			}
+
+			/* If you also want list items themselves to be left-aligned even if nested */
+			main section ul li,
+			main section ol li {
+			  text-align: left;
+			}
 
 /* Wide */
 
@@ -2241,6 +2253,26 @@
 
 			#main section.cover {
 				padding: 5em 0;
+			}
+
+			/* Left-align lists inside main content sections */
+			#main section ul,
+			#main section ol {
+			  text-align: left;
+			  display: inline-block;  /* keeps list nicely sized inside centered sections */
+			  margin-left: 0;
+			  margin-right: 0;
+			}
+
+			/* If you want bullets/numbers visible */
+			#main section ul {
+			  list-style: disc;
+			  padding-left: 1.25em;
+			}
+
+			#main section ol {
+			  list-style: decimal;
+			  padding-left: 1.25em;
 			}
 
 	}
@@ -2500,6 +2532,26 @@
 					padding: 4em 0;
 				}
 
+				/* Left-align lists inside main content sections */
+				#main section ul,
+				#main section ol {
+				  text-align: left;
+				  display: inline-block;  /* keeps list nicely sized inside centered sections */
+				  margin-left: 0;
+				  margin-right: 0;
+				}
+
+				/* If you want bullets/numbers visible */
+				#main section ul {
+				  list-style: disc;
+				  padding-left: 1.25em;
+				}
+
+				#main section ol {
+				  list-style: decimal;
+				  padding-left: 1.25em;
+				}
+
 	}
 
 /* Mobile */
@@ -2542,6 +2594,25 @@
 				#main section.cover header {
 					padding: 0 1em;
 				}
+			/* Left-align lists inside main content sections */
+			#main section ul,
+			#main section ol {
+			  text-align: left;
+			  display: inline-block;  /* keeps list nicely sized inside centered sections */
+			  margin-left: 0;
+			  margin-right: 0;
+			}
+
+			/* If you want bullets/numbers visible */
+			#main section ul {
+			  list-style: disc;
+			  padding-left: 1.25em;
+			}
+
+			#main section ol {
+			  list-style: decimal;
+			  padding-left: 1.25em;
+			}
 
 		/* Footer */
 
@@ -2558,3 +2629,4 @@
 				}
 
 	}
+
