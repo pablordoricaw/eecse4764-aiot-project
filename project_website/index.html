@@ -1,293 +1,489 @@
-<!DOCTYPE HTML>
+<!DOCTYPE html>
 <!--
-	Prologue by HTML5 UP
-	html5up.net | @n33co
-	Free for personal and commercial use under the CCA 3.0 license (html5up.net/license)
+  Prologue by HTML5 UP
+  html5up.net | @n33co
+  Free for personal and commercial use under the CCA 3.0 license (html5up.net/license)
 -->
-<html>
-	<head>
-		<title>Columbia University EECS E4764 AIoT Group 9 Project Report</title>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="referrer" content="strict-origin-when-cross-origin">
-		<link rel="stylesheet" href="assets/css/main.css" />
-	</head>
-	<body>
+<html lang="en">
+  <head>
+    <title>Columbia University EECS E4764 AIoT Group 9 Project Report</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <link rel="stylesheet" href="assets/css/main.css" />
+  </head>
+  <body>
 
-		<!-- Header -->
-			<div id="header">
-				<div class="top">
-					<!-- Logo -->
-						<div id="logo">
-							<h1 id="title">AI-Powered Medical Device Error Triage System</h1>
-							<p>Columbia University <br>
-								EECS E4764 Fall'25 <br>
-								Artificial Intelligence of Things<br>
-								Group 9 Project Report
-							</p>
-						</div>
+    <!-- Header -->
+    <div id="header">
+      <div class="top">
 
-					<!-- Nav -->
-						<nav id="nav">
-							<!--
-								Prologue's nav expects links in one of two formats:
-								1. Hash link (scrolls to a different section within the page)
-								   <li><a href="#foobar" id="foobar-link" class="icon fa-whatever-icon-you-want skel-layers-ignoreHref"><span class="label">Foobar</span></a></li>
-								2. Standard link (sends the user to another page/site)
-								   <li><a href="http://foobar.tld" id="foobar-link" class="icon fa-whatever-icon-you-want"><span class="label">Foobar</span></a></li>
-							-->
-							<ul>
-								<li><a href="#top" id="top-link" class="skel-layers-ignoreHref"><span class="icon fa-home">Abstract</span></a></li>
-								<li><a href="#motivation" id="motivation-link" class="skel-layers-ignoreHref"><span class="icon fa-th">Motivation</span></a></li>
-								<li><a href="#system" id="system-link" class="skel-layers-ignoreHref"><span class="icon fa-th">System</span></a></li>
-								<li><a href="#results" id="results-link" class="skel-layers-ignoreHref"><span class="icon fa-th">Results</span></a></li>
-								<li><a href="#references" id="references-link" class="skel-layers-ignoreHref"><span class="icon fa-th">References</span></a></li>
-								<li><a href="#team" id="team-link" class="skel-layers-ignoreHref"><span class="icon fa-user">Our Group</span></a></li>
-								<li><a href="#contact" id="contact-link" class="skel-layers-ignoreHref"><span class="icon fa-envelope">Contact</span></a></li>
-							</ul>
-						</nav>
+        <!-- Logo -->
+        <div id="logo">
+          <h1 id="title">AI-Powered Medical Device Error Triage System</h1>
+          <p>
+            Columbia University <br />
+            EECS E4764 Fall '25 <br />
+            Artificial Intelligence of Things <br />
+            Group 9 Project Report
+          </p>
+        </div>
 
-				</div>
+        <!-- Nav -->
+        <nav id="nav" aria-label="Main navigation">
+          <ul>
+            <li>
+              <a href="#top" id="top-link" class="skel-layers-ignoreHref">
+                <span class="icon fa-home">Abstract</span>
+              </a>
+            </li>
+            <li>
+              <a href="#motivation" id="motivation-link" class="skel-layers-ignoreHref">
+                <span class="icon fa-th">Motivation</span>
+              </a>
+            </li>
+            <li>
+              <a href="#system" id="system-link" class="skel-layers-ignoreHref">
+                <span class="icon fa-th">System</span>
+              </a>
+            </li>
+            <li>
+              <a href="#results" id="results-link" class="skel-layers-ignoreHref">
+                <span class="icon fa-th">Results</span>
+              </a>
+            </li>
+            <li>
+              <a href="#references" id="references-link" class="skel-layers-ignoreHref">
+                <span class="icon fa-th">References</span>
+              </a>
+            </li>
+            <li>
+              <a href="#team" id="team-link" class="skel-layers-ignoreHref">
+                <span class="icon fa-user">Our Group</span>
+              </a>
+            </li>
+            <li>
+              <a href="#contact" id="contact-link" class="skel-layers-ignoreHref">
+                <span class="icon fa-envelope">Contact</span>
+              </a>
+            </li>
+          </ul>
+        </nav>
 
-				<div class="bottom">
-					<!-- Social Icons Navbar -->
-						<ul class="icons">
-							<li><a href="https://www.github.com/pablordoricaw/eecse4764-aiot-project" class="icon fa-github"><span class="label">Github</span></a></li>
-						</ul>
-				</div>
+      </div>
 
-			</div>
+      <div class="bottom">
+        <!-- Social Icons Navbar -->
+        <ul class="icons">
+          <li>
+            <a
+              href="https://www.github.com/pablordoricaw/eecse4764-aiot-project"
+              class="icon fa-github"
+            >
+              <span class="label">Github</span>
+            </a>
+          </li>
+        </ul>
+      </div>
 
-		<!-- Main -->
-			<div id="main">
+    </div>
 
-				<!-- Intro -->
-					<section id="top" class="one dark cover">
-						<div class="container">
+    <!-- Main -->
+    <div id="main" role="main">
 
-								<div class="video-wrapper">
-								  <iframe
-									width="560"
-									height="315"
-									src="https://www.youtube.com/embed/LQcYC40uBVI?si=6CKIAnIgd6koE8Qq"
-									title="YouTube video player"
-									frameborder="0"
-									allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-									allowfullscreen>
-								  </iframe>
-								</div>
+      <!-- Intro -->
+      <section id="top" class="one dark cover">
+        <div class="container">
 
-								<h2 class="alt">AI-Powered Medical Device Error Triage System</h2>
-								<p>Project Wonderland is a blah blah blah</p>
-								<p>(Abstract here)</p>
+          <div class="video-wrapper">
+            <iframe
+              width="560"
+              height="315"
+              src="https://www.youtube.com/embed/LQcYC40uBVI?si=6CKIAnIgd6koE8Qq"
+              title="YouTube video player"
+              frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+            ></iframe>
+          </div>
 
+          <h2 class="alt">AI-Powered Medical Device Error Triage System</h2>
+          <p>
+            Modern hospitals generate large volumes of device logs, but biomedical and clinical
+            engineering teams still spend significant time manually triaging alarms to decide
+            which issues are urgent, which are environmental, and which can wait. This project
+            implements an end‑to‑end prototype of an AI‑powered medical device error triage
+            system that ingests ventilator logs, enriches them with room temperature/humidity
+            measurements and historical FDA MAUDE incident data, and uses a language model to
+            generate structured diagnostic reports. The system runs across three subsystems—a
+            simulated ventilator and logging pipeline, an ESP32‑based sensor node, and an LLM
+            server—and demonstrates how AI of Things can support faster, more consistent error
+            triage in real clinical environments.
+          </p>
 
-							<footer>
-								<a href="#motivation" class="button scrolly">Motivation</a>
-							</footer>
+          <footer>
+            <a href="#motivation" class="button scrolly">Motivation</a>
+          </footer>
 
-						</div>
-					</section>
+        </div>
+      </section>
 
-					<section id="motivation" class="two">
-						<div class="container">
+      <section id="motivation" class="two">
+        <div class="container">
 
-							<header>
-								<h2>Motivation</h2>
-							</header>
+          <header>
+            <h2>Motivation</h2>
+          </header>
 
-							<p align="left">You can choose to use photos or figures to help</p>
+          <p align="left">
+            Hospitals rely on fleets of complex medical devices such as ventilators, monitors,
+            and imaging systems. When these devices raise errors or alarms, biomedical and
+            clinical engineering teams must quickly determine whether the problem is caused by
+            the environment (e.g., a hot room or high humidity), by user configuration, or by
+            an internal hardware failure. Today this triage process is largely manual:
+            engineers review device logs, check room conditions, search historical incident
+            databases, and then decide what to do. This is time‑consuming, error‑prone, and
+            difficult to scale as the number of connected devices grows.
+          </p>
 
+          <p align="left">
+            Our goal is to explore how AI of Things can assist this workflow by automatically
+            correlating device logs with ambient sensor data and with prior similar incidents.
+            By building a complete prototype—from a simulated ventilator and logging pipeline,
+            to an on‑premises sensor node, to a retrieval‑augmented LLM backend—we show that it
+            is feasible to automatically generate human‑readable diagnostic reports that
+            highlight likely root causes and suggested actions. This does not replace human
+            judgement, but aims to reduce the time to first triage, surface important patterns,
+            and provide a more consistent starting point for investigation.
+          </p>
 
+        </div>
+      </section>
 
-						</div>
-					</section>
+      <section id="system" class="three">
+        <div class="container">
 
+          <header>
+            <h2>System</h2>
+          </header>
 
-					<section id="system" class="three">
-						<div class="container">
+          <p align="left">Remember to use combination of descriptions, photos, and figures.</p>
 
-							<header>
-								<h2>System</h2>
-							</header>
+          <h3 align="left">Architecture</h3>
+          <p align="left">
+            The system is composed of three main subsystems connected over a local network. On
+            the left, a simulated ventilator application generates realistic log events and
+            writes them to disk. A logs pipeline process tails these JSONL log files, normalizes
+            each record, and inserts them into a SQLite database. A FastAPI‑based logs server
+            exposes a <code>/logs</code> HTTP endpoint that lets other components query
+            time‑bounded slices of log history, with optional enrichment from the FDA MAUDE
+            database via the openFDA API.
+          </p>
+          <p align="left">
+            In the middle, an Adafruit HUZZAH32 ESP32 V2 Feather board with a Si7021
+            temperature/humidity sensor periodically reads room conditions and polls the logs
+            server for new entries. When it detects an error episode, the microcontroller
+            collects a short window of pre‑error and post‑error logs, aligns each log with the
+            closest sensor reading in time, and posts this enriched sequence to the LLM server
+            over HTTP. On the right, the LLM server combines the incoming logs and sensor data
+            with similar historical cases retrieved from a BioBERT‑indexed dataset, constructs a
+            few‑shot prompt, and queries a GPT model to produce a structured diagnostic report
+            that can be saved and inspected by technicians.
+          </p>
+          <p align="center">
+            <img
+              src="images/aiot-project-full-system-dataflow.png"
+              alt="High-level system dataflow diagram for the AI-powered medical device error triage system"
+              style="max-width: 100%; height: auto;"
+            />
+          </p>
 
-							<p align="left">Remember to use combination of descriptions, photos, and figures</p>
+          <h3 align="left">Technical Components</h3>
 
-							<h3 align="left">Architecture</h3>
+          <p align="left">
+            <strong>Medical device subsystem.</strong>
+            The medical device subsystem is implemented in Python and consists of three modules:
+          </p>
+          <ul align="left">
+            <li><code>ventilator_01.py</code></li>
+            <li><code>logs_pipeline.py</code></li>
+            <li><code>logs_server.py</code></li>
+          </ul>
+          <p align="left">
+            The ventilator module simulates a real device by generating timestamped
+            log events (info, warnings, and error episodes) and writing them as JSONL files.
+            The logs pipeline watches the logs directory, parses each new line, computes a stable
+            <code>log_id</code>, and inserts records into a SQLite database while deduplicating on that ID.
+            The logs server is a FastAPI application that exposes a <code>/logs</code> endpoint, allowing
+            clients (such as the MCU) to request slices of log history by device ID, time range, and limit,
+            with optional enrichment from the FDA MAUDE database via the openFDA API.
+          </p>
 
-							<p align="left">Blah blah blah</p>
+          <p align="center">
+            <img
+              src="images/aiot-project-medical-device-system-dataflow.png"
+              alt="Medical device subsystem dataflow: ventilator, logs pipeline, and logs server"
+              style="max-width: 40%; height: auto;"
+            />
+          </p>
 
+          <p align="left">
+            <strong>MCU subsystem.</strong> The MCU subsystem runs MicroPython on an Adafruit
+            HUZZAH32 ESP32 V2 Feather board and acts as the on‑premises “edge” node that ties
+            the system together. It handles Wi‑Fi connectivity, periodic I²C reads from the
+            Si7021 temperature and humidity sensor, and optional status updates on a small
+            SSD1306 OLED display. The firmware maintains a time‑stamped buffer of sensor
+            readings and, when it detects an error episode in the logs returned by the logs
+            server, it selects the closest sensor sample for each log entry and attaches
+            <code>sensor_temp_c</code> and <code>sensor_humidity</code> fields before
+            forwarding the enriched sequence to the LLM server over HTTP.
+          </p>
 
-							<h3 align="left">Technical Components</h3>
+          <p align="left">
+            The physical prototype uses the HUZZAH32 board connected to the Si7021 sensor via a
+            STEMMA QT / Qwiic JST‑SH 4‑pin cable, and optionally an SSD1306 OLED display wired
+            with jumper cables (VCC to VCC, GND to GND, SCL to pin 20, SDA to pin 21). A
+            breadboard, USB‑C cable, and standard male‑male jumper wires are used to organize
+            power and signal connections. A complete list of components, wiring details, and
+            step‑by‑step setup instructions are provided in the project README:
+            <a href="https://github.com/pablordoricaw/eecse4764-aiot-project/blob/main/README.md">
+              https://github.com/pablordoricaw/eecse4764-aiot-project/blob/main/README.md
+            </a>.
+          </p>
 
-							<p align="left">Blah blah blah</p>
+          <p align="left">
+            <strong>LLM server subsystem.</strong> The LLM server subsystem is built with FastAPI and implements a
+            retrieval‑augmented generation pipeline. When the server starts, it loads BioBERT
+            (<code>dmis-lab/biobert-base-cased-v1.1</code>) and a curated training dataset of historical error
+            cases, converts each case into a compact textual summary (error code, device type, average temperature,
+            average humidity), and computes a single embedding per case. These embeddings and their associated
+            metadata are stored in memory and reused for all future requests, so the cost of building the RAG index
+            is paid once at initialization rather than on every error episode.
+          </p>
 
+          <p align="left">
+            At runtime, the server accepts individual enriched log messages from the MCU over a
+            <code>/api/ingest</code> endpoint and buffers them per device until a complete error episode (a
+            fixed‑length sequence of pre‑error, error, and post‑error logs) has been received. For each completed
+            episode, it aggregates the logs into a single query description (including error code, device ID,
+            and the average room temperature and humidity), embeds this query with BioBERT, and computes cosine
+            similarity against the pre‑computed training embeddings to retrieve the top‑k most similar historical
+            cases. These retrieved cases are then injected, along with fixed few‑shot examples and the current
+            episode’s logs, into a prompt that is sent to a GPT model via the Poe API, which returns a structured
+            diagnostic report.
+          </p>
 
-							<h3 align="left">Prototype</h3>
+          <p align="center">
+            <img
+              src="images/aiot-project-llm-server-system-dataflow.png"
+              alt="LLM server subsystem dataflow: BioBERT retrieval, few-shot prompt construction, and GPT report generation"
+              style="max-width: 100%; height: auto;"
+            />
+          </p>
 
-							<p align="left">Blah blah blah</p>
+          <h3 align="left">Prototype</h3>
 
+          <p align="left">
+            The final prototype can run end‑to‑end on a single laptop plus one ESP32‑based
+            sensor node. On the laptop, three Python processes simulate the hospital backend:
+            the ventilator generator streams logs into rotating JSONL files, the logs pipeline
+            ingests those files into a SQLite database, and the logs server exposes a
+            <code>/logs</code> API that the microcontroller and LLM server can query. A separate
+            FastAPI process runs the LLM server, loading BioBERT and the curated case dataset at
+            startup, then generating a structured diagnostic report whenever a complete error
+            episode is received.
+          </p>
 
+          <p align="left">
+            On the hardware side, the HUZZAH32 ESP32 V2 board connects to the same Wi‑Fi
+            network as the laptop and periodically reads room temperature and humidity from the
+            Si7021 sensor. When the logs server indicates that a new ventilator error has
+            occurred, the MCU pulls the surrounding log entries, aligns each one with the
+            closest sensor reading, and sends the enriched sequence to the LLM server. The OLED
+            display shows a compact status view (Wi‑Fi state, current temperature/humidity, and
+            last error code) so the prototype can be demoed without a separate serial console.
+          </p>
 
-						</div>
-					</section>
+          <p align="left">
+            To streamline demonstrations, a small tmux‑based launcher script opens one window
+            per subsystem (ventilator, logs pipeline, logs server, LLM server, and MCU REPL) and
+            starts all processes with a single command. This allows observers to see logs,
+            database activity, HTTP requests, and LLM outputs in real time while interacting
+            with the physical prototype on the lab bench.
+          </p>
 
-					<section id="results" class="two">
-						<div class="container">
+        </div>
+      </section>
 
-							<header>
-								<h2>Results</h2>
-							</header>
+      <section id="results" class="two">
+        <div class="container">
 
-							<p align="left">Remember to use figures to help illustrate results</p>
+          <header>
+            <h2>Results</h2>
+          </header>
 
+          <p align="left">Remember to use figures to help illustrate results.</p>
 
-							<article class="item">
-								<a href="#" class="image fit"><img src="images/pic06.jpg" alt="" /></a>
-								<header>
-									<h3>Caption</h3>
-								</header>
-							</article>
+          <article class="item">
+            <a href="#" class="image fit">
+              <img src="images/pic06.jpg" alt="Results figure placeholder" />
+            </a>
+            <header>
+              <h3>Caption</h3>
+            </header>
+          </article>
 
+        </div>
+      </section>
 
-						</div>
-					</section>
+      <section id="references" class="three">
+        <div class="container">
 
-					<section id="references" class="three">
-						<div class="container">
+          <header>
+            <h2>References</h2>
+          </header>
 
-							<header>
-								<h2>References</h2>
-							</header>
+          <p align="left">Blah blah blah</p>
 
-							<p align="left">Blah blah blah</p>
+        </div>
+      </section>
 
-						</div>
-					</section>
+      <section id="team" class="two">
+        <div class="container">
 
-					<section id="team" class="two">
-						<div class="container">
+          <header>
+            <h2>Group 9</h2>
+          </header>
 
-							<header>
-								<h2>Group 9</h2>
-							</header>
+          <div class="row">
 
-							<!-- <a href="#" class="image featured"><img src="images/pic08.jpg" alt="" /></a> -->
-							<div class="row">
+            <div class="4u 12u$(mobile)">
+              <article class="item">
+                <a href="https://www.linkedin.com/in/pablordoricaw/" class="image fit">
+                  <img src="images/headshot_pablo.jpg" alt="Headshot of Pablo" />
+                </a>
+                <header>
+                  <h3>Pablo Ordorica Wiener</h3>
+                  <p>
+                    <a href="https://github.com/pablordoricaw" class="icon fa-github">
+                      <span class="label">GitHub</span>
+                    </a>
+                    <a href="https://github.com/pablordoricaw">@pablordoricaw</a>
+                    <br />
+                    Computer Engineering MS student at Columbia University (Dec. '25)
+                  </p>
+                </header>
+              </article>
+            </div>
 
-								<div class="4u 12u$(mobile)">
-								  <article class="item">
-								    <a href="https://www.linkedin.com/in/pablordoricaw/" class="image fit">
-								      <img src="images/headshot_pablo.jpg" alt="Headshot of Pablo"/>
-								    </a>
-								    <header>
-								      <h3>Pablo Ordorica Wiener</h3>
-								      <p>
-								        <a href="https://github.com/pablordoricaw" class="icon fa-github">
-								          <span class="label">GitHub</span>
-								        </a>
-										<a href="https://github.com/pablordoricaw">@pablordoricaw</a><br>
-								        Computer Engineering MS student at Columbia University (Dec. '25)
-								      </p>
-								    </header>
-								  </article>
-								</div>
+            <div class="4u 12u$(mobile)">
+              <article class="item">
+                <a href="https://www.linkedin.com/in/" class="image fit">
+                  <img src="images/headshot_jason.jpg" alt="Headshot of Jason" />
+                </a>
+                <header>
+                  <h3>Ying-Shun (Jason) Liao</h3>
+                  <p>
+                    <a href="https://github.com/jasonnliao" class="icon fa-github">
+                      <span class="label">GitHub</span>
+                    </a>
+                    <a href="https://github.com/jasonnliao">@jasonnliao</a>
+                    <br />
+                    Electrical Engineering MS student at Columbia University (Dec. '26)
+                  </p>
+                </header>
+              </article>
+            </div>
 
-								<div class="4u 12u$(mobile)">
-								  <article class="item">
-								    <a href="https://www.linkedin.com/in/" class="image fit">
-								      <img src="images/headshot_jason.jpg" alt="Headshot of Jason"/>
-								    </a>
-								    <header>
-									  <h3>Ying-Shun (Jason) Liao</h3>
-								      <p>
-								        <a href="https://github.com/jasonnliao" class="icon fa-github">
-								          <span class="label">GitHub</span>
-								        </a>
-										<a href="https://github.com/jasonnliao">@jasonnliao</a><br>
-								        Electrical Engineering MS student at Columbia University (Dec. '26)
-								      </p>
-								    </header>
-								  </article>
-								</div>
+            <div class="4u 12u$(mobile)">
+              <article class="item">
+                <a href="https://www.linkedin.com/in/" class="image fit">
+                  <img src="images/headshot_richard.jpg" alt="Headshot of Richard" />
+                </a>
+                <header>
+                  <h3>Junhyung (Richard) Oh</h3>
+                  <p>
+                    <a href="https://github.com/ohrjh10" class="icon fa-github">
+                      <span class="label">GitHub</span>
+                    </a>
+                    <a href="https://github.com/ohrjh10">@ohrjh10</a>
+                    <br />
+                    Electrical Engineering MS student at Columbia University (Dec. '26)
+                  </p>
+                </header>
+              </article>
+            </div>
 
-								<div class="4u 12u$(mobile)">
-								  <article class="item">
-								    <a href="https://www.linkedin.com/in/" class="image fit">
-								      <img src="images/headshot_richard.jpg" alt="Headshot of Richard"/>
-								    </a>
-								    <header>
-									  <h3>Junhyung (Richard) Oh</h3>
-								      <p>
-								        <a href="https://github.com/ohrjh10" class="icon fa-github">
-								          <span class="label">GitHub</span>
-								        </a>
-										<a href="https://github.com/ohrjh10">@ohrjh10</a><br>
-								        Electrical Engineering MS student at Columbia University (Dec. '26)
-								      </p>
-								    </header>
-								  </article>
-								</div>
+            <div class="4u 12u$(mobile)">
+              <article class="item">
+                <a href="https://www.linkedin.com/in/" class="image fit">
+                  <img src="images/headshot_rahul.jpg" alt="Headshot of Rahul" />
+                </a>
+                <header>
+                  <h3>Rahul Murugan</h3>
+                  <p>
+                    <a href="https://github.com/rahulmurugan" class="icon fa-github">
+                      <span class="label">GitHub</span>
+                    </a>
+                    <a href="https://github.com/rahulmurugan">@rahulmurugan</a>
+                    <br />
+                    Electrical Engineering MS student at Columbia University (Dec. '25)
+                  </p>
+                </header>
+              </article>
+            </div>
 
-								<div class="4u 12u$(mobile)">
-								  <article class="item">
-								    <a href="https://www.linkedin.com/in/" class="image fit">
-								      <img src="images/headshot_rahul.jpg" alt="Headshot of Rahul"/>
-								    </a>
-								    <header>
-									  <h3>Rahul Murugan</h3>
-								      <p>
-								        <a href="https://github.com/rahulmurugan" class="icon fa-github">
-								          <span class="label">GitHub</span>
-								        </a>
-										<a href="https://github.com/rahulmurugan">@rahulmurugan</a><br>
-								        Electrical Engineering MS student at Columbia University (Dec. '25)
-								      </p>
-								    </header>
-								  </article>
-								</div>
-							</div>
-						</div>
-					</section>
+          </div>
+        </div>
+      </section>
 
-				<!-- Contact -->
-					<section id="contact" class="four">
-						<div class="container">
+      <!-- Contact -->
+      <section id="contact" class="four">
+        <div class="container">
 
-							<header>
-								<h2>Contact</h2>
-							</header>
+          <header>
+            <h2>Contact</h2>
+          </header>
 
-							<p align="left">
-								<strong>Pablo Ordorica Wiener: </strong><a href="mailto:pablo.ordorica@columbia.edu">pablo.ordorica@columbia.edu</a></br>
-								<strong>Contact Name 2: </strong>email here</br>
-							</br>
-								<strong>Columbia University </strong><a href="http://www.ee.columbia.edu">Department of Electrical Engineering</a><br>
-								<strong>Instructor:</strong> <a href="https://www.engineering.columbia.edu/faculty-staff/directory/xiaofan-fred-jiang">Professsor Xiaofan (Fred) Jiang</a>
-							</p>
-						</div>
-					</section>
+          <p align="left">
+            <strong>Pablo Ordorica Wiener: </strong>
+            <a href="mailto:pablo.ordorica@columbia.edu">pablo.ordorica@columbia.edu</a><br />
+            <strong>Contact Name 2: </strong>email here<br />
+            <br />
+            <strong>Columbia University </strong>
+            <a href="http://www.ee.columbia.edu">Department of Electrical Engineering</a><br />
+            <strong>Instructor: </strong>
+            <a href="https://www.engineering.columbia.edu/faculty-staff/directory/xiaofan-fred-jiang">
+              Professsor Xiaofan (Fred) Jiang
+            </a>
+          </p>
 
-			</div>
+        </div>
+      </section>
 
-		<!-- Footer -->
-			<div id="footer">
+    </div>
 
-				<!-- Copyright -->
-					<ul class="copyright">
-						<li>&copy; AIoT Project | All rights reserved.</li><li>Design: <a href="http://html5up.net">HTML5 UP</a></li>
-					</ul>
+    <!-- Footer -->
+    <div id="footer">
 
-			</div>
+      <!-- Copyright -->
+      <ul class="copyright">
+        <li>&copy; AIoT Project | All rights reserved.</li>
+        <li>Design: <a href="http://html5up.net">HTML5 UP</a></li>
+      </ul>
 
-		<!-- Scripts -->
-			<script src="assets/js/jquery.min.js"></script>
-			<script src="assets/js/jquery.scrolly.min.js"></script>
-			<script src="assets/js/jquery.scrollzer.min.js"></script>
-			<script src="assets/js/skel.min.js"></script>
-			<script src="assets/js/util.js"></script>
-			<!--[if lte IE 8]><script src="assets/js/ie/respond.min.js"></script><![endif]-->
-			<script src="assets/js/main.js"></script>
+    </div>
 
-	</body>
+    <!-- Scripts -->
+    <script src="assets/js/jquery.min.js"></script>
+    <script src="assets/js/jquery.scrolly.min.js"></script>
+    <script src="assets/js/jquery.scrollzer.min.js"></script>
+    <script src="assets/js/skel.min.js"></script>
+    <script src="assets/js/util.js"></script>
+    <!--[if lte IE 8]>
+      <script src="assets/js/ie/respond.min.js"></script>
+    <![endif]-->
+    <script src="assets/js/main.js"></script>
+
+  </body>
 </html>
